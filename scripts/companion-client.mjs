@@ -45,7 +45,7 @@ export async function readDiscovery() {
   }
 }
 
-async function request(discovery, method, route, { body, timeoutMs = 4000 } = {}) {
+export async function request(discovery, method, route, { body, timeoutMs = 4000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

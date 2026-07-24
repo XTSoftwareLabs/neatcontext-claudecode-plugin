@@ -7,5 +7,11 @@
   },
   "homepage": "https://github.com/XTSoftwareLabs/neatcontext-claudecode-plugin",
   "license": "MIT",
-  "keywords": ["neatcontext", "context", "incidents", "grounding", "mcp"]
+  "keywords": ["neatcontext", "context", "incidents", "grounding", "mcp"],
+  "mcpServers": {
+    "neatcontext": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-bridge.mjs"]
+    }
+  }
 }
