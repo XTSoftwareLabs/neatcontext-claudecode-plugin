@@ -1,0 +1,18 @@
+{
+  "name": "neatcontext-claudecode-plugin",
+  "version": "0.1.0",
+  "description": "Claude Code plugin to select a NeatContext context and ground answers in it.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node --check scripts/companion-client.mjs && node --check scripts/inject-context.mjs && node --check scripts/neatcontext-cli.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/XTSoftwareLabs/neatcontext-claudecode-plugin.git"
+  }
+}
