@@ -1,0 +1,11 @@
+{
+  "name": "neatcontext",
+  "version": "0.1.0",
+  "description": "Select a NeatContext context inside Claude Code and ground every answer in it.",
+  "author": {
+    "name": "XTSoftwareLabs"
+  },
+  "homepage": "https://github.com/XTSoftwareLabs/neatcontext-claudecode-plugin",
+  "license": "MIT",
+  "keywords": ["neatcontext", "context", "incidents", "grounding", "mcp"]
+}

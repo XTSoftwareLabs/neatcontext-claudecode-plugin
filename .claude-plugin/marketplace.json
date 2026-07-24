@@ -1,0 +1,14 @@
+{
+  "name": "neatcontext",
+  "owner": {
+    "name": "XTSoftwareLabs",
+    "url": "https://github.com/XTSoftwareLabs"
+  },
+  "plugins": [
+    {
+      "name": "neatcontext",
+      "source": "./",
+      "description": "Select a NeatContext context inside Claude Code and ground every answer in it."
+    }
+  ]
+}
