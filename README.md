@@ -1,25 +1,26 @@
 # NeatContext plugin for Claude Code
 
-Pick a **NeatContext** context from inside Claude Code and have every answer in
-the session grounded in that context's domain profile and local knowledge — no
-app switching, no copy-paste.
+Pick a **NeatContext** context from inside Claude Code and have the whole session
+grounded in it — its domain profile, local knowledge, and read-only extension
+tools — with no app switching and no copy-paste.
 
 ## What it does
 
+- `/neatcontext:list` — list the contexts you can connect.
 - `/neatcontext:use [context]` — connect a context to the current session.
 - `/neatcontext:status` — show which context is connected.
-- Once a context is connected, a `UserPromptSubmit` hook injects the context's
-  pointers (profile file paths + knowledge folder paths) before each prompt, so
-  Claude Code reads and searches those local sources with its own tools.
 
-You can switch contexts at any time by running `/neatcontext:use` again — it
-takes effect on your next message, with no restart.
+Once a context is connected, the plugin's MCP server exposes NeatContext's
+`get_context` tool, the `analyze_incident` prompt, and the connected context's
+**extension tools** (e.g. your incident/log/deploy connectors). Switching
+contexts with `/neatcontext:use` again takes effect live — the tool list
+refreshes without restarting the session.
 
 ## Requirements
 
 - **NeatContext desktop app**, installed and **open**. The plugin talks to it
   over a local-only connection that exists only while the app is running.
-- **Node.js 18+** (for the plugin's small helper scripts and the hook).
+- **Node.js 18+** (for the plugin's helper scripts and the MCP bridge).
 
 ## Install
 
@@ -30,31 +31,31 @@ From Claude Code:
 /plugin install neatcontext@neatcontext
 ```
 
-Then open the NeatContext desktop app and run `/neatcontext:use` in Claude Code.
+Then open the NeatContext desktop app, run `/neatcontext:use` to connect a
+context, and ask your question.
 
 ## How it connects
 
-The plugin never reads NeatContext's internals. It uses a small, stable public
-integration surface the desktop app exposes on the loopback interface while it
-is open:
+The plugin never reads NeatContext's internals or bundles its binary. It ships a
+generic **MCP bridge** (`scripts/mcp-bridge.mjs`) that relays Model Context
+Protocol traffic to NeatContext's local companion endpoint, which hosts the real
+NeatContext MCP surface. The bridge only speaks:
 
-- a discovery file at `~/.neatcontext/companion.json` holding the local port and
-  a per-session token (override with the `NEATCONTEXT_COMPANION_FILE`
-  environment variable), and
-- a handful of read-oriented HTTP endpoints (`/v1/health`, `/v1/contexts`,
-  `/v1/connection`, `/v1/context`), all gated by the token.
+- standard MCP (the protocol Claude Code already uses for tools/prompts), and
+- the documented companion HTTP contract on the loopback interface: a discovery
+  file at `~/.neatcontext/companion.json` (port + per-session token; override
+  with `NEATCONTEXT_COMPANION_FILE`) and a token-gated `POST /v1/mcp` plus a few
+  read endpoints (`/v1/health`, `/v1/contexts`, `/v1/connection`).
 
-The endpoints expose only context names and pointer text (paths to your local
-files). No file contents, model credentials, or connection secrets ever cross
-this boundary, and nothing leaves your machine.
+Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 
 ## Troubleshooting
 
-- **"NeatContext desktop is not running."** Open the NeatContext app and make
+- **"NeatContext desktop is not reachable."** Open the NeatContext app and make
   sure a workspace is loaded, then retry.
 - **No contexts listed.** Create a context in the NeatContext app first.
-- **The hook adds nothing.** That is expected until you connect a context with
-  `/neatcontext:use`.
+- **Extension tools don't appear.** Connect a context first with
+  `/neatcontext:use`; the tool list refreshes when you do.
 
 ## License
 
