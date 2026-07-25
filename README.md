@@ -47,6 +47,10 @@ NeatContext MCP surface. The bridge only speaks:
   with `NEATCONTEXT_COMPANION_FILE`) and a token-gated `POST /v1/mcp` plus a few
   read endpoints (`/v1/health`, `/v1/contexts`, `/v1/connection`).
 
+The context you pick is recorded next to the discovery file, in
+`~/.neatcontext/plugin-selection.json` — a context id and name, nothing else. It
+is what lets the plugin reconnect after NeatContext is restarted.
+
 Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 
 ## Troubleshooting
@@ -56,6 +60,11 @@ Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 - **No contexts listed.** Create a context in the NeatContext app first.
 - **Extension tools don't appear.** Connect a context first with
   `/neatcontext:use`; the tool list refreshes when you do.
+- **You restarted NeatContext mid-session.** The app holds the connection in
+  memory, so quitting it disconnects the context. The plugin remembers what you
+  selected and reconnects it on the next question — no need to re-run
+  `/neatcontext:use`. If the context was deleted from NeatContext in the
+  meantime, the plugin says so and asks you to pick another.
 
 ## License
 

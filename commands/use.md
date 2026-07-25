@@ -13,9 +13,10 @@ Result of the selection attempt:
 Based on the output above:
 
 - If it confirms a context was connected, tell the user which context is now
-  active. From now on, call the `get_context` tool (or the `analyze_incident`
-  prompt) to ground answers, and the connected context's extension tools become
-  available in this session. Do not restate the context contents.
+  active and stop there — do not run a second command or tool call to verify it.
+  From now on, call the `get_context` tool (or the `analyze_incident` prompt) to
+  ground answers, and the connected context's extension tools become available
+  in this session. Do not restate the context contents.
 - If it lists available contexts (because none was given or the name was
   ambiguous), show that list and ask which one to use.
 - If it says NeatContext is not running, relay that the NeatContext desktop app

@@ -9,7 +9,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check scripts/companion-client.mjs && node --check scripts/mcp-bridge.mjs && node --check scripts/neatcontext-cli.mjs"
+    "check": "node --check scripts/companion-client.mjs && node --check scripts/mcp-bridge.mjs && node --check scripts/neatcontext-cli.mjs",
+    "test": "node --test"
   },
   "repository": {
     "type": "git",

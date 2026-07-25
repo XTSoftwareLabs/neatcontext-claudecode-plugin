@@ -22,7 +22,7 @@ The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 
 ```bash
 npm run check   # node --check on each helper script
-npm test        # node --test, if the branch has tests
+npm test        # node --test against a fake companion API
 ```
 
 CI (`.github/workflows/ci.yml`) runs both on every pull request, on Node 18, 20
