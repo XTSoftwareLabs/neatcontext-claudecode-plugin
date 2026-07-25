@@ -8,7 +8,7 @@
 //
 // Exit code is always 0: the output is meant to be read, not branched on.
 
-import { connect, NOT_RUNNING_MESSAGE } from "./companion-client.mjs";
+import { connect, ensureConnection, NOT_RUNNING_MESSAGE, writeSelection } from "./companion-client.mjs";
 
 function print(line = "") {
   process.stdout.write(`${line}\n`);
@@ -43,14 +43,21 @@ function resolveContext(contexts, query) {
   return { error: partial.length > 1 ? "ambiguous" : "not_found" };
 }
 
+// The connection is read through `ensureConnection` so a NeatContext restart —
+// which drops the app's in-memory connection — is repaired here rather than
+// reported as "no context is connected".
 async function loadContexts(client) {
+  const state = await ensureConnection(client).catch(() => null);
   const response = await client.listContexts();
   if (response.status !== 200) {
     return null;
   }
   return {
     contexts: response.json?.contexts ?? [],
-    connectedId: response.json?.connected?.contextId ?? null
+    connectedId: state?.connected?.contextId ?? response.json?.connected?.contextId ?? null,
+    connectedName: state?.connected?.contextName ?? null,
+    restored: state?.restored === true,
+    restoreFailed: state?.restoreFailed === true
   };
 }
 
@@ -74,7 +81,17 @@ async function run() {
   if (command === "status") {
     if (connectedId) {
       const current = contexts.find((context) => context.id === connectedId);
-      print(`Connected context: ${current ? current.name : connectedId}`);
+      const name = current ? current.name : (state.connectedName ?? connectedId);
+      print(
+        state.restored
+          ? `Connected context: ${name} (NeatContext had restarted; the plugin reconnected it).`
+          : `Connected context: ${name}`
+      );
+    } else if (state.restoreFailed) {
+      print(
+        "The context this session was using is no longer available in NeatContext. " +
+          "Use `/neatcontext:use` to pick another one."
+      );
     } else {
       print("No context is connected yet. Use `/neatcontext:use` to pick one.");
     }
@@ -106,6 +123,12 @@ async function run() {
     }
     const selection = await client.selectContext(resolution.context.id);
     if (selection.status === 200) {
+      // Remembered so the bridge can put the connection back if NeatContext is
+      // restarted while this session is still open.
+      await writeSelection({
+        contextId: resolution.context.id,
+        contextName: selection.json.contextName ?? resolution.context.name
+      }).catch(() => undefined);
       print(
         `Connected the "${selection.json.contextName}" context. Your next messages ` +
           "in this session will be grounded in it."

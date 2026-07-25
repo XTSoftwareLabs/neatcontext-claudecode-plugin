@@ -21,6 +21,7 @@ The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 
 ```bash
 npm run check   # node --check on each helper script
+npm test        # node --test against a fake companion API
 ```
 
 Please keep the plugin decoupled from NeatContext's internals: it should only
