@@ -66,7 +66,10 @@ function parseArgs(argv) {
   return { flags, query: rest.join(" ").trim() };
 }
 
-function formatSection(title, contexts, offset, connectedId) {
+function formatSection(title, contexts, offset, connectedId, emptyNote) {
+  if (contexts.length === 0) {
+    return `${title}\n  ${emptyNote}`;
+  }
   const width = Math.max(...contexts.map((context) => context.name.length), 0);
   const rows = contexts.map((context, index) => {
     const marker = context.id === connectedId ? "  (connected)" : "";
@@ -75,31 +78,45 @@ function formatSection(title, contexts, offset, connectedId) {
   return [title, ...rows].join("\n");
 }
 
+// Where the standard contexts went. Only worth saying when there are none to
+// show: a populated list needs no explaining.
+function noStandardNote(state) {
+  if (!state.appRunning) {
+    return "(none — open the NeatContext desktop app to use standard contexts)";
+  }
+  if (!state.appListed) {
+    return "(none — NeatContext desktop is open but has no workspace loaded)";
+  }
+  return "(none — create one in the NeatContext desktop app)";
+}
+
 // The two kinds are listed apart, because they are different things: one comes
 // from the desktop app, one is the plugin's own. The numbering runs continuously
 // across both sections so `use <number>` still indexes the merged list the way
 // the user is reading it.
 function formatList(state) {
   const standard = state.contexts.filter((context) => context.kind === "standard");
-  const blocks = [];
   const connectedId = state.connected?.id ?? null;
-  if (standard.length > 0) {
-    blocks.push(
-      formatSection("Standard contexts (from NeatContext desktop):", standard, 0, connectedId)
-    );
-  }
-  if (state.lite.length > 0) {
-    blocks.push(
-      formatSection("Lite contexts (created here):", state.lite, standard.length, connectedId)
-    );
-  }
-  return blocks.join("\n\n");
+  return [
+    formatSection("Standard contexts:", standard, 0, connectedId, noStandardNote(state)),
+    formatSection(
+      "Lite contexts:",
+      state.lite,
+      standard.length,
+      connectedId,
+      "(none — create one with `/neatcontext:create`)"
+    )
+  ].join("\n\n");
 }
 
 function formatLiteList(state) {
-  return state.lite.length > 0
-    ? formatSection("Lite contexts (created here):", state.lite, 0, state.connected?.id ?? null)
-    : "  (none — create one with `/neatcontext:create`)";
+  return formatSection(
+    "Lite contexts:",
+    state.lite,
+    0,
+    state.connected?.id ?? null,
+    "(none — create one with `/neatcontext:create`)"
+  );
 }
 
 function resolveContext(contexts, query) {
@@ -176,15 +193,6 @@ async function loadState() {
   };
 }
 
-function appMissingNote(state) {
-  if (state.appRunning && state.appListed) {
-    return null;
-  }
-  return state.appRunning
-    ? "Standard contexts aren't listed: NeatContext desktop is running but no workspace is open."
-    : "Standard contexts aren't listed: the NeatContext desktop app isn't running.";
-}
-
 async function commandStatus(state) {
   const { connected } = state;
   if (connected?.kind === "lite") {
@@ -230,41 +238,15 @@ async function commandStatus(state) {
 }
 
 function commandList(state, { liteOnly }) {
-  if (liteOnly) {
-    if (state.lite.length === 0) {
-      print("You have no lite contexts. Create one with `/neatcontext:create`.");
-      return;
-    }
-    print(formatLiteList(state));
-    return;
-  }
-
-  if (state.contexts.length === 0) {
-    print("No contexts yet. Create a lite context with `/neatcontext:create`.");
-    const note = appMissingNote(state);
-    if (note) {
-      print(note);
-    }
-    print(UPGRADE_NOTE);
-    return;
-  }
-
-  print(formatList(state));
-  const note = appMissingNote(state);
-  if (note) {
-    print("");
-    print(note);
-  }
+  print(liteOnly ? formatLiteList(state) : formatList(state));
 }
 
 async function commandUse(state, query) {
   const { contexts } = state;
   if (contexts.length === 0) {
-    print("No contexts to connect. Create a lite context with `/neatcontext:create`.");
-    const note = appMissingNote(state);
-    if (note) {
-      print(note);
-    }
+    print("No contexts to connect.");
+    print("");
+    print(formatList(state));
     return;
   }
   if (query.length === 0) {
@@ -279,10 +261,6 @@ async function commandUse(state, query) {
     print(`No single context matched "${query}".`);
     print("");
     print(formatList(state));
-    const note = appMissingNote(state);
-    if (note) {
-      print(note);
-    }
     return;
   }
 

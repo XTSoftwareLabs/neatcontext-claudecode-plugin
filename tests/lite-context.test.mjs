@@ -123,7 +123,7 @@ describe("creating a lite context", () => {
   it("refuses a knowledge folder that does not exist", async () => {
     const output = await createContext("Ghost", { folder: path.join(home, "nope") });
     assert.match(output, /No folder at/);
-    assert.match(await cli("list", "--lite"), /no lite contexts/);
+    assert.match(await cli("list", "--lite"), /Lite contexts:\s+\(none/);
   });
 
   it("refuses an empty profile", async () => {
@@ -135,6 +135,21 @@ describe("creating a lite context", () => {
     await createContext("Payments Runbooks");
     const output = await createContext("Payments Runbooks");
     assert.match(output, /already exists/);
+  });
+});
+
+describe("listing with no standard contexts", () => {
+  it("explains where they are, in the section that is empty", async () => {
+    await createContext("Payments Runbooks");
+    const listed = await cli("list");
+
+    assert.match(listed, /Standard contexts:\s+\(none — open the NeatContext desktop app/);
+    assert.match(listed, /Lite contexts:\s+1\. Payments Runbooks/);
+  });
+
+  it("numbers the lite contexts from 1 when there are no standard ones", async () => {
+    await createContext("Payments Runbooks");
+    assert.match(await cli("use", "1"), /Connected the "Payments Runbooks" lite context/);
   });
 });
 
@@ -317,8 +332,10 @@ describe("lite and standard side by side", () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");
 
-    assert.match(listed, /Standard contexts \(from NeatContext desktop\):/);
-    assert.match(listed, /Lite contexts \(created here\):/);
+    assert.match(listed, /Standard contexts:/);
+    assert.match(listed, /Lite contexts:/);
+    // A populated list explains nothing: the headings carry it.
+    assert.doesNotMatch(listed, /NeatContext desktop app/);
     // The kind is the section, so rows no longer repeat it.
     assert.doesNotMatch(listed, /\(standard\)/);
     assert.doesNotMatch(listed, /\(lite\)/);
