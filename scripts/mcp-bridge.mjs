@@ -46,6 +46,26 @@ const OFFLINE_GET_CONTEXT =
   "NeatContext desktop is not reachable right now. Once it is running, use " +
   "/neatcontext:use to connect a Context, then ask again.";
 
+// Session instructions are fetched once, during the handshake, and MCP has no
+// way to change them afterwards. The recorded selection is on disk before the
+// handshake, though, so the source that will serve this session is already known
+// here: a lite context is framed by the plugin, a standard one by NeatContext.
+//
+// Anything that varies per context belongs in get_context instead, which is
+// re-read on every call and refreshed live by tools/list_changed. These
+// instructions do one job: get get_context called at the right moments.
+const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and one local knowledge folder, stored on this machine.
+
+Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
+
+A lite context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
+
+Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
+
+const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context is connected to this session yet, so there is nothing to ground answers in.
+
+When the user asks something that depends on their own domain, documents, tools, or team conventions, tell them to connect a Context with /neatcontext:use — or to create a local one with /neatcontext:create, which needs no other software. Then call get_context and answer from what it returns.`;
+
 // Methods whose answer depends on which context is connected.
 const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);
 
@@ -146,7 +166,10 @@ async function liteResponse(message, lite) {
       protocolVersion:
         typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
       capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
-      serverInfo: SERVER_INFO
+      serverInfo: SERVER_INFO,
+      // NeatContext's own framing is never borrowed for a lite context, whether
+      // or not the app happens to be running.
+      instructions: LITE_INSTRUCTIONS
     });
   }
   if (method === "ping") return jsonRpcResult(id, {});
@@ -183,7 +206,10 @@ function offlineResponse(message) {
       protocolVersion:
         typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
       capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
-      serverInfo: SERVER_INFO
+      serverInfo: SERVER_INFO,
+      // Nothing is connected and NeatContext cannot be asked, so the session is
+      // told how to get grounded rather than left with no framing at all.
+      instructions: NO_CONTEXT_INSTRUCTIONS
     });
   }
   if (method === "ping") return jsonRpcResult(id, {});
@@ -263,8 +289,13 @@ async function handleMessage(message) {
   // Re-attach the selected context before anything that reads it, so a
   // NeatContext restart mid-session cannot silently strip the grounding. A lite
   // context has nothing to re-attach: the selection file is the connection.
+  //
+  // The handshake counts: restarting the host with a standard context already
+  // remembered must reconnect it there, so the session is grounded from its
+  // first message and the first tools/list carries the extension tools —
+  // by construction, not by which message the host happens to send first.
   let state;
-  if (!lite && CONTEXT_METHODS.has(message.method)) {
+  if (!lite && (CONTEXT_METHODS.has(message.method) || message.method === "initialize")) {
     state = await source.ensure();
     if (state && state.version !== null) {
       lastVersion = state.version;

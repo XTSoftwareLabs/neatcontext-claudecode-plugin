@@ -10,7 +10,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { startFakeCompanion } from "./fake-companion.mjs";
+import { NEATCONTEXT_INSTRUCTIONS, startFakeCompanion } from "./fake-companion.mjs";
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 
@@ -153,6 +153,55 @@ describe("listing with no standard contexts", () => {
   });
 });
 
+// Session instructions are fetched once, at the handshake, and MCP cannot change
+// them afterwards. The selection is on disk before the handshake, so the bridge
+// already knows which source will serve the session — which is what makes a
+// restart with a remembered context work without running /neatcontext:use.
+describe("session instructions for a lite context", () => {
+  it("frames the session itself, with NeatContext desktop absent", async () => {
+    await createContext("Payments Runbooks");
+    await cli("use", "Payments");
+
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      assert.match(instructions, /NeatContext Lite context/);
+      assert.match(instructions, /Call the get_context tool before answering/);
+      // The point of the whole change: no borrowed incident framing.
+      assert.doesNotMatch(instructions, /incident/i);
+    } finally {
+      session.close();
+    }
+  });
+
+  it("takes effect on a restart that never runs /neatcontext:use", async () => {
+    await createContext("Payments Runbooks");
+    await cli("use", "Payments");
+
+    // A fresh host process, as if Claude Code had been restarted: the only thing
+    // carried over is the selection file.
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      assert.match(instructions, /NeatContext Lite context/);
+      assert.match(contextText(await session.getContext()), /connected context: Payments Runbooks/);
+    } finally {
+      session.close();
+    }
+  });
+
+  it("tells a session with nothing connected how to get grounded", async () => {
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      assert.match(instructions, /No NeatContext Context is connected/);
+      assert.match(instructions, /\/neatcontext:create/);
+    } finally {
+      session.close();
+    }
+  });
+});
+
 describe("a session grounded in a lite context", () => {
   it("serves get_context with NeatContext desktop absent", async () => {
     await createContext("Payments Runbooks");
@@ -169,6 +218,9 @@ describe("a session grounded in a lite context", () => {
       // The folder listing is what makes one-folder lite searchable.
       assert.match(text, /runbook\.md/);
       assert.match(text, /tsg\/latency\.md/);
+      // Handshake framing cannot be changed mid-session, so this is the only
+      // place left to disown an incident contract the session may be carrying.
+      assert.match(text, /not an incident context unless the profile above says so/);
     } finally {
       session.close();
     }
@@ -326,6 +378,43 @@ describe("lite and standard side by side", () => {
   beforeEach(() => {
     companion.state.connected = null;
     companion.state.version = 0;
+  });
+
+  it("keeps NeatContext's own instructions for a standard context", async () => {
+    await cli("use", "payment team");
+
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      // Forwarded intact, never rewritten: NeatContext owns the framing for its
+      // own contexts, the plugin owns it for lite ones.
+      assert.equal(instructions, NEATCONTEXT_INSTRUCTIONS);
+    } finally {
+      session.close();
+    }
+  });
+
+  it("frames by the selection on disk, not by whether the app is running", async () => {
+    await createContext("Payments Runbooks");
+
+    await cli("use", "payment team");
+    let session = openSession();
+    try {
+      assert.match((await session.handshake()).result.instructions, /incident investigation/);
+    } finally {
+      session.close();
+    }
+
+    // Same machine, same running app — only the selection changed.
+    await cli("use", "Payments Runbooks");
+    session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      assert.match(instructions, /NeatContext Lite context/);
+      assert.doesNotMatch(instructions, /incident/i);
+    } finally {
+      session.close();
+    }
   });
 
   it("lists the two kinds in their own sections", async () => {

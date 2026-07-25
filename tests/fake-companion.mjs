@@ -12,6 +12,12 @@ export const NO_CONTEXT_TEXT =
   "No NeatContext Context is connected to this session. Run /neatcontext:use to " +
   "choose one, then ask again.";
 
+// Stands in for the session instructions the desktop backend returns from
+// initialize: a NeatContext-AI persona built around incident investigation.
+export const NEATCONTEXT_INSTRUCTIONS =
+  "You are NeatContext AI, a local-first incident investigation assistant. " +
+  "Always call get_context before answering an incident question.";
+
 async function readBody(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -114,7 +120,8 @@ function mcpResponse(state, message) {
     return ok({
       protocolVersion: "2025-06-18",
       capabilities: { tools: {}, prompts: {} },
-      serverInfo: { name: "neatcontext-backend", version: "test" }
+      serverInfo: { name: "neatcontext-backend", version: "test" },
+      instructions: NEATCONTEXT_INSTRUCTIONS
     });
   }
   if (message?.method === "tools/list") {

@@ -30,6 +30,12 @@ The plugin does not surface NeatContext's `analyze_incident` prompt. A context
 is whatever you made it, and many are not about incidents at all, so an
 incident-shaped command in the menu would misrepresent what is connected.
 
+Each session is also framed by the context it starts with, so restarting Claude
+Code with a context already connected picks up where you left off — you don't
+have to run `/neatcontext:use` again. A **standard** context is framed by
+NeatContext, a **lite** context by the plugin, in plain terms that assume nothing
+about your subject area.
+
 ## Lite contexts
 
 `/neatcontext:create` asks three questions:
