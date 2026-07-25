@@ -21,11 +21,14 @@ There are two kinds of context:
 - `/neatcontext:delete [context]` — delete a lite context.
 
 Once a context is connected, the plugin's MCP server exposes the `get_context`
-tool. A **standard** context adds the `analyze_incident` prompt and the
-context's **extension tools** (e.g. your incident/log/deploy connectors);
-switching contexts with `/neatcontext:use` takes effect live — the tool list
-refreshes without restarting the session. A **lite** context serves only
-`get_context`.
+tool. A **standard** context adds the context's **extension tools** (e.g. your
+incident/log/deploy connectors); switching contexts with `/neatcontext:use`
+takes effect live — the tool list refreshes without restarting the session. A
+**lite** context serves only `get_context`.
+
+The plugin does not surface NeatContext's `analyze_incident` prompt. A context
+is whatever you made it, and many are not about incidents at all, so an
+incident-shaped command in the menu would misrepresent what is connected.
 
 ## Lite contexts
 

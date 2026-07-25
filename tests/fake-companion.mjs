@@ -124,6 +124,17 @@ function mcpResponse(state, message) {
     }
     return ok({ tools });
   }
+  // NeatContext serves an incident prompt; the plugin is expected to hide it.
+  if (message?.method === "prompts/list") {
+    return ok({
+      prompts: [{ name: "analyze_incident" }, { name: "summarize_context" }]
+    });
+  }
+  if (message?.method === "prompts/get") {
+    return ok({
+      messages: [{ role: "user", content: { type: "text", text: `prompt: ${message.params?.name}` } }]
+    });
+  }
   if (message?.method === "tools/call" && message.params?.name === "get_context") {
     const text = state.connected
       ? `Connected context: ${state.connected.contextName}`

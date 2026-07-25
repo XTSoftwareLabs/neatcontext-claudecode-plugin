@@ -2,8 +2,8 @@
 //
 // Claude Code launches this as an MCP server. It relays the host's MCP JSON-RPC
 // to the NeatContext desktop app's local companion endpoint (POST /v1/mcp),
-// which hosts the real NeatContext MCP surface (get_context, analyze_incident,
-// and the connected context's extension tools). This file contains NO
+// which hosts the real NeatContext MCP surface (get_context and the connected
+// context's extension tools). This file contains NO
 // NeatContext code and never touches its binary — it only speaks MCP and the
 // documented companion HTTP contract.
 //
@@ -48,6 +48,29 @@ const OFFLINE_GET_CONTEXT =
 
 // Methods whose answer depends on which context is connected.
 const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);
+
+// Prompts NeatContext serves that this plugin does not surface. A context here
+// is whatever the user made it — plenty of them, lite ones especially, have
+// nothing to do with incidents — so an incident-shaped slash command sitting in
+// the menu misrepresents what the connected context is for.
+const HIDDEN_PROMPTS = new Set(["analyze_incident"]);
+
+function isHiddenPromptGet(message) {
+  return message.method === "prompts/get" && HIDDEN_PROMPTS.has(message.params?.name);
+}
+
+function withoutHiddenPrompts(response) {
+  if (!Array.isArray(response?.result?.prompts)) {
+    return response;
+  }
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      prompts: response.result.prompts.filter((prompt) => !HIDDEN_PROMPTS.has(prompt.name))
+    }
+  };
+}
 
 function writeLine(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -143,8 +166,8 @@ async function liteResponse(message, lite) {
         code: -32601,
         message:
           `"${params?.name}" is not available on a lite context. Lite contexts serve only ` +
-          "get_context; extension tools and prompts come from a standard context in the " +
-          "NeatContext desktop app."
+          "get_context; extension tools come from a standard context in the NeatContext " +
+          "desktop app."
       }
     };
   }
@@ -248,7 +271,17 @@ async function handleMessage(message) {
     }
   }
 
-  const response = lite ? await liteResponse(message, lite) : await forward(message);
+  // A hidden prompt is answered here rather than forwarded, so it behaves like
+  // the prompt it is not listed as: unknown.
+  const response = isHiddenPromptGet(message)
+    ? {
+        jsonrpc: "2.0",
+        id: message.id ?? null,
+        error: { code: -32602, message: `Unknown prompt: ${message.params?.name}` }
+      }
+    : lite
+      ? await liteResponse(message, lite)
+      : await forward(message);
 
   if (message.method === "initialize" && response && response.result) {
     patchInitialize(response);
@@ -258,10 +291,18 @@ async function handleMessage(message) {
   }
 
   if (!isNotification && response) {
-    writeLine(
-      !lite && message.method === "tools/list" ? withConnectedTools(response, state) : response
-    );
+    writeLine(shapeResponse(message, response, lite, state));
   }
+}
+
+function shapeResponse(message, response, lite, state) {
+  if (message.method === "prompts/list") {
+    return withoutHiddenPrompts(response);
+  }
+  if (!lite && message.method === "tools/list") {
+    return withConnectedTools(response, state);
+  }
+  return response;
 }
 
 let watching = false;

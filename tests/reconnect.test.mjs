@@ -153,6 +153,39 @@ describe("a session keeps its context when NeatContext restarts", () => {
   });
 });
 
+// A context here is whatever the user made it, so an incident-shaped slash
+// command in the menu misrepresents what is connected.
+describe("the analyze_incident prompt", () => {
+  it("is not offered, while NeatContext's other prompts are", async () => {
+    await cli("use", "payment", "team");
+
+    const session = openSession();
+    try {
+      await session.handshake();
+      const names = (await session.send("prompts/list")).result.prompts.map(
+        (prompt) => prompt.name
+      );
+      assert.deepEqual(names, ["summarize_context"]);
+    } finally {
+      session.close();
+    }
+  });
+
+  it("answers as unknown if asked for by name", async () => {
+    await cli("use", "payment", "team");
+
+    const session = openSession();
+    try {
+      await session.handshake();
+      const response = await session.send("prompts/get", { name: "analyze_incident" });
+      assert.equal(response.result, undefined);
+      assert.match(response.error.message, /Unknown prompt: analyze_incident/);
+    } finally {
+      session.close();
+    }
+  });
+});
+
 describe("a session that never picked a context", () => {
   it("does not invent a connection", async () => {
     const session = openSession();
