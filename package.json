@@ -10,7 +10,7 @@
   },
   "scripts": {
     "check": "node --check scripts/companion-client.mjs && node --check scripts/mcp-bridge.mjs && node --check scripts/neatcontext-cli.mjs",
-    "test": "node --test \"tests/**/*.test.mjs\""
+    "test": "node --test"
   },
   "repository": {
     "type": "git",
