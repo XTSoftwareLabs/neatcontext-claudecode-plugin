@@ -18,6 +18,20 @@ export const NEATCONTEXT_INSTRUCTIONS =
   "You are NeatContext AI, a local-first incident investigation assistant. " +
   "Always call get_context before answering an incident question.";
 
+// Shuts a bridge process down the way Claude Code does — by closing its stdin —
+// and waits for it to go. Killing it would work for the assertions, but a
+// killed process never flushes its V8 coverage profile, and the diff-coverage
+// gate is measured from what these child processes write on exit.
+export function closeSession(child) {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return resolve();
+    }
+    child.once("exit", () => resolve());
+    child.stdin.end();
+  });
+}
+
 async function readBody(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);

@@ -10,7 +10,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { NEATCONTEXT_INSTRUCTIONS, startFakeCompanion } from "./fake-companion.mjs";
+import { NEATCONTEXT_INSTRUCTIONS, closeSession, startFakeCompanion } from "./fake-companion.mjs";
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 
@@ -97,7 +97,7 @@ function openSession() {
     },
     getContext: () => send("tools/call", { name: "get_context", arguments: {} }),
     toolNames: async () => (await send("tools/list")).result.tools.map((tool) => tool.name),
-    close: () => child.kill()
+    close: () => closeSession(child)
   };
 }
 
@@ -170,7 +170,7 @@ describe("session instructions for a lite context", () => {
       // The point of the whole change: no borrowed incident framing.
       assert.doesNotMatch(instructions, /incident/i);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -186,7 +186,7 @@ describe("session instructions for a lite context", () => {
       assert.match(instructions, /NeatContext Lite context/);
       assert.match(contextText(await session.getContext()), /connected context: Payments Runbooks/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -197,7 +197,7 @@ describe("session instructions for a lite context", () => {
       assert.match(instructions, /No NeatContext Context is connected/);
       assert.match(instructions, /\/neatcontext:create/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 });
@@ -222,7 +222,7 @@ describe("a session grounded in a lite context", () => {
       // place left to disown an incident contract the session may be carrying.
       assert.match(text, /not an incident context unless the profile above says so/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -236,7 +236,7 @@ describe("a session grounded in a lite context", () => {
       assert.deepEqual(await session.toolNames(), ["get_context"]);
       assert.deepEqual((await session.send("prompts/list")).result.prompts, []);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -252,7 +252,7 @@ describe("a session grounded in a lite context", () => {
       await session.handshake();
       assert.match(contextText(await session.getContext()), /knowledge folder for this context .* is missing/s);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -271,7 +271,7 @@ describe("a session grounded in a lite context", () => {
 
       assert.match(contextText(await session.getContext()), /no longer exists on disk/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -390,7 +390,7 @@ describe("lite and standard side by side", () => {
       // own contexts, the plugin owns it for lite ones.
       assert.equal(instructions, NEATCONTEXT_INSTRUCTIONS);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -402,7 +402,7 @@ describe("lite and standard side by side", () => {
     try {
       assert.match((await session.handshake()).result.instructions, /incident investigation/);
     } finally {
-      session.close();
+      await session.close();
     }
 
     // Same machine, same running app — only the selection changed.
@@ -413,7 +413,7 @@ describe("lite and standard side by side", () => {
       assert.match(instructions, /NeatContext Lite context/);
       assert.doesNotMatch(instructions, /incident/i);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -484,7 +484,7 @@ describe("lite and standard side by side", () => {
       assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
       assert.match(contextText(await session.getContext()), /Connected context: payment team/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 

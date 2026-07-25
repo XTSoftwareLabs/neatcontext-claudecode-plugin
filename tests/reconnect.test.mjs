@@ -10,7 +10,7 @@ import readline from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { NO_CONTEXT_TEXT, startFakeCompanion } from "./fake-companion.mjs";
+import { NO_CONTEXT_TEXT, closeSession, startFakeCompanion } from "./fake-companion.mjs";
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 let companion;
@@ -83,7 +83,7 @@ function openSession() {
     },
     getContext: () => send("tools/call", { name: "get_context", arguments: {} }),
     toolNames: async () => (await send("tools/list")).result.tools.map((tool) => tool.name),
-    close: () => child.kill()
+    close: () => closeSession(child)
   };
 }
 
@@ -105,7 +105,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
         contextName: "payment team"
       });
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -120,7 +120,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
 
       assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -133,7 +133,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
       await session.handshake();
       assert.match(contextText(await session.getContext()), /Connected context: payment team/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -153,7 +153,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
       });
       assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -187,7 +187,7 @@ describe("the analyze_incident prompt", () => {
       );
       assert.deepEqual(names, ["summarize_context"]);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -201,7 +201,7 @@ describe("the analyze_incident prompt", () => {
       assert.equal(response.result, undefined);
       assert.match(response.error.message, /Unknown prompt: analyze_incident/);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 });
@@ -214,7 +214,7 @@ describe("a session that never picked a context", () => {
       assert.match(contextText(await session.getContext()), new RegExp(NO_CONTEXT_TEXT.slice(0, 40)));
       assert.equal(companion.state.puts, 0);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 
@@ -228,7 +228,7 @@ describe("a session that never picked a context", () => {
       await session.handshake();
       assert.deepEqual(await session.toolNames(), ["get_context"]);
     } finally {
-      session.close();
+      await session.close();
     }
   });
 });
