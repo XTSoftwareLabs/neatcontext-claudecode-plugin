@@ -23,12 +23,15 @@
 //   * if NeatContext is not reachable, we answer locally so the MCP server still
 //     loads; get_context then tells the user to connect with /neatcontext:use.
 //
-// Source seam: today the only context source is NeatContext (below). A future
-// local "light context" source can be added without NeatContext by routing
-// handle()/version() to a local implementation.
+// Source seam: a session is served by one of two sources, chosen per message
+// from the recorded selection. A *standard* context is NeatContext's and is
+// forwarded to the app (below). A *lite* context is the plugin's own and is
+// answered locally — no HTTP, no app, so it keeps working with NeatContext
+// closed or never installed.
 
 import readline from "node:readline";
-import { clientFor, ensureConnection, readDiscovery, request } from "./companion-client.mjs";
+import { clientFor, ensureConnection, readDiscovery, readSelection, request } from "./companion-client.mjs";
+import { LITE_MISSING_MESSAGE, readLite, renderLiteContext } from "./lite-context.mjs";
 
 const SERVER_INFO = { name: "neatcontext", version: "0.1.0" };
 const GET_CONTEXT_TOOL = {
@@ -93,6 +96,59 @@ function neatContextSource() {
     },
     postMcp
   };
+}
+
+// --- Lite source: answers locally, from disk ---------------------------------
+
+// The selected lite context, or null when this session is on a standard one.
+// A selection whose context was deleted out-of-band resolves to `missing` so
+// get_context can say what happened instead of silently falling back to
+// NeatContext and reporting "no context is connected".
+async function activeLite() {
+  const selection = await readSelection().catch(() => null);
+  if (!selection || selection.kind !== "lite") {
+    return null;
+  }
+  const record = await readLite(selection.contextId).catch(() => null);
+  return record ? { record } : { missing: true, name: selection.contextName };
+}
+
+async function liteResponse(message, lite) {
+  const { id, method, params } = message;
+  if (id === undefined || id === null) {
+    return null; // notification: nothing to answer
+  }
+  if (method === "initialize") {
+    return jsonRpcResult(id, {
+      protocolVersion:
+        typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
+      capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
+      serverInfo: SERVER_INFO
+    });
+  }
+  if (method === "ping") return jsonRpcResult(id, {});
+  // A lite context is one profile and one folder: get_context is the whole
+  // surface, and there are no extensions or prompts by design.
+  if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
+  if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
+  if (method === "tools/call" && params?.name === GET_CONTEXT_TOOL.name) {
+    const text = lite.missing ? LITE_MISSING_MESSAGE : await renderLiteContext(lite.record);
+    return jsonRpcResult(id, { content: [{ type: "text", text }], isError: false });
+  }
+  if (method === "tools/call" || method === "prompts/get") {
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32601,
+        message:
+          `"${params?.name}" is not available on a lite context. Lite contexts serve only ` +
+          "get_context; extension tools and prompts come from a standard context in the " +
+          "NeatContext desktop app."
+      }
+    };
+  }
+  return jsonRpcResult(id, {});
 }
 
 // --- Offline fallback: keep the MCP server usable without NeatContext --------
@@ -162,33 +218,49 @@ async function forward(message) {
   }
 }
 
+// What the host's tool list depends on. Switching between contexts — of either
+// kind — has to change this, so the extension tools of a standard context
+// appear and disappear live.
+async function currentVersion() {
+  const lite = await activeLite();
+  if (lite) {
+    return lite.missing ? "lite:missing" : `lite:${lite.record.id}`;
+  }
+  return (await source.ensure())?.version ?? null;
+}
+
 async function handleMessage(message) {
   const isNotification = message.id === undefined || message.id === null;
   if (message.method === "initialize") {
     lastInitialize = message;
   }
 
+  const lite = await activeLite();
+
   // Re-attach the selected context before anything that reads it, so a
-  // NeatContext restart mid-session cannot silently strip the grounding.
+  // NeatContext restart mid-session cannot silently strip the grounding. A lite
+  // context has nothing to re-attach: the selection file is the connection.
   let state;
-  if (CONTEXT_METHODS.has(message.method)) {
+  if (!lite && CONTEXT_METHODS.has(message.method)) {
     state = await source.ensure();
     if (state && state.version !== null) {
       lastVersion = state.version;
     }
   }
 
-  const response = await forward(message);
+  const response = lite ? await liteResponse(message, lite) : await forward(message);
 
   if (message.method === "initialize" && response && response.result) {
     patchInitialize(response);
     started = true;
-    lastVersion = (await source.ensure())?.version ?? null;
+    lastVersion = await currentVersion();
     startVersionWatch();
   }
 
   if (!isNotification && response) {
-    writeLine(message.method === "tools/list" ? withConnectedTools(response, state) : response);
+    writeLine(
+      !lite && message.method === "tools/list" ? withConnectedTools(response, state) : response
+    );
   }
 }
 
@@ -198,9 +270,9 @@ function startVersionWatch() {
   watching = true;
   setInterval(async () => {
     if (!started) return;
-    const state = await source.ensure();
-    if (state && state.version !== null && state.version !== lastVersion) {
-      lastVersion = state.version;
+    const version = await currentVersion();
+    if (version !== null && version !== lastVersion) {
+      lastVersion = version;
       writeLine({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
     }
   }, 1500).unref?.();

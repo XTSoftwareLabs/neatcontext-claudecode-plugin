@@ -38,6 +38,17 @@ export function discoveryFilePath() {
 // the selection here so it can put the connection back instead of leaving a
 // running session silently ungrounded. Lives beside the discovery file, which
 // keeps NEATCONTEXT_COMPANION_FILE a single override for both.
+//
+// For a lite context (kind: "lite") this file is not a recovery record but the
+// authority: there is no app holding that connection in memory.
+//
+// A lite selection deliberately carries its id in `liteContextId`, NOT in
+// `contextId`. Plugin updates land while sessions are still running, so an
+// older bridge process — holding the pre-lite code in memory — can outlive the
+// update. That code reads every `contextId` as a NeatContext context, fails to
+// restore a lite one, and treats the failure as "deleted upstream" by erasing
+// the file. Leaving `contextId` absent makes a lite selection invisible to it:
+// it reads no selection, and so has nothing to erase.
 export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
@@ -58,8 +69,26 @@ export async function readDiscovery() {
 export async function readSelection() {
   try {
     const parsed = JSON.parse(await readFile(selectionFilePath(), "utf8"));
-    if (typeof parsed?.contextId === "string" && parsed.contextId.trim().length > 0) {
+    // `contextId` is also accepted for a lite kind so a selection written by an
+    // earlier build of this feature still resolves.
+    const liteId =
+      typeof parsed?.liteContextId === "string"
+        ? parsed.liteContextId
+        : parsed?.kind === "lite" && typeof parsed?.contextId === "string"
+          ? parsed.contextId
+          : null;
+    if (liteId !== null && liteId.trim().length > 0) {
       return {
+        kind: "lite",
+        contextId: liteId,
+        contextName: typeof parsed.contextName === "string" ? parsed.contextName : liteId
+      };
+    }
+    if (typeof parsed?.contextId === "string" && parsed.contextId.trim().length > 0) {
+      // Selections written before lite contexts existed have no kind, and every
+      // one of them is a NeatContext context.
+      return {
+        kind: "standard",
         contextId: parsed.contextId,
         contextName:
           typeof parsed.contextName === "string" ? parsed.contextName : parsed.contextId
@@ -155,8 +184,11 @@ export async function ensureConnection(client) {
     return { connected, version, restored: false };
   }
 
+  // A lite selection is served locally and is not a NeatContext context: asking
+  // the app to connect that id would 404 and, worse, make the failure path below
+  // discard a perfectly good selection.
   const remembered = await readSelection();
-  if (!remembered) {
+  if (!remembered || remembered.kind !== "standard") {
     return { connected: null, version, restored: false };
   }
 
