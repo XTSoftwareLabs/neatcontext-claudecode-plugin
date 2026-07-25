@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -216,6 +216,54 @@ describe("a session grounded in a lite context", () => {
     assert.match(status, /Connected context: Payments Runbooks \(lite\)/);
     assert.match(status, /Knowledge folder: .*docs \(2 files\)/);
     assert.match(status, /no extension tools/);
+  });
+});
+
+// Plugin updates land while sessions are still running, so a bridge process
+// holding the pre-lite code in memory can outlive one. That code reads every
+// `contextId` as a NeatContext context, fails to restore a lite one, and treats
+// the failure as "deleted upstream" by erasing the selection file — silently
+// disconnecting a session that just connected.
+describe("a lite selection and an older plugin process", () => {
+  // The pre-lite reader, verbatim.
+  function preLiteReadSelection(parsed) {
+    if (typeof parsed?.contextId === "string" && parsed.contextId.trim().length > 0) {
+      return {
+        contextId: parsed.contextId,
+        contextName: typeof parsed.contextName === "string" ? parsed.contextName : parsed.contextId
+      };
+    }
+    return null;
+  }
+
+  it("is invisible to the pre-lite reader, so it has nothing to erase", async () => {
+    await createContext("Payments Runbooks");
+    await cli("use", "Payments");
+
+    const written = JSON.parse(
+      await readFile(path.join(home, "plugin-selection.json"), "utf8")
+    );
+    assert.equal(written.kind, "lite");
+    assert.ok(written.liteContextId.startsWith("lite:"));
+    // The load-bearing assertion: no `contextId` for old code to act on.
+    assert.equal(written.contextId, undefined);
+    assert.equal(preLiteReadSelection(written), null);
+  });
+
+  it("still reads a selection written by an earlier build of this feature", async () => {
+    await createContext("Payments Runbooks");
+    const id = /(lite:[a-z0-9-]+)/.exec(
+      await readFile(
+        path.join(home, "lite", (await readdir(path.join(home, "lite")))[0], "context.json"),
+        "utf8"
+      )
+    )[1];
+    await writeFile(
+      path.join(home, "plugin-selection.json"),
+      JSON.stringify({ kind: "lite", contextId: id, contextName: "Payments Runbooks" })
+    );
+
+    assert.match(await cli("status"), /Connected context: Payments Runbooks \(lite\)/);
   });
 });
 

@@ -272,7 +272,9 @@ async function commandUse(state, query) {
     if (state.client) {
       await state.client.disconnect().catch(() => undefined);
     }
-    await writeSelection({ kind: "lite", contextId: target.id, contextName: target.name });
+    // `liteContextId`, not `contextId`: see selectionFilePath() for why a lite
+    // selection has to be invisible to pre-lite plugin processes.
+    await writeSelection({ kind: "lite", liteContextId: target.id, contextName: target.name });
     print(
       `Connected the "${target.name}" lite context. Your next messages in this session ` +
         "will be grounded in its domain profile and knowledge folder."
