@@ -38,6 +38,9 @@ export function discoveryFilePath() {
 // the selection here so it can put the connection back instead of leaving a
 // running session silently ungrounded. Lives beside the discovery file, which
 // keeps NEATCONTEXT_COMPANION_FILE a single override for both.
+//
+// For a lite context (kind: "lite") this file is not a recovery record but the
+// authority: there is no app holding that connection in memory.
 export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
@@ -60,6 +63,9 @@ export async function readSelection() {
     const parsed = JSON.parse(await readFile(selectionFilePath(), "utf8"));
     if (typeof parsed?.contextId === "string" && parsed.contextId.trim().length > 0) {
       return {
+        // Selections written before lite contexts existed have no kind, and
+        // every one of them is a NeatContext context.
+        kind: parsed.kind === "lite" ? "lite" : "standard",
         contextId: parsed.contextId,
         contextName:
           typeof parsed.contextName === "string" ? parsed.contextName : parsed.contextId
@@ -155,8 +161,11 @@ export async function ensureConnection(client) {
     return { connected, version, restored: false };
   }
 
+  // A lite selection is served locally and is not a NeatContext context: asking
+  // the app to connect that id would 404 and, worse, make the failure path below
+  // discard a perfectly good selection.
   const remembered = await readSelection();
-  if (!remembered) {
+  if (!remembered || remembered.kind !== "standard") {
     return { connected: null, version, restored: false };
   }
 
