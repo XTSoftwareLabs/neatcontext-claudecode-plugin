@@ -66,21 +66,40 @@ function parseArgs(argv) {
   return { flags, query: rest.join(" ").trim() };
 }
 
-function label(context) {
-  return context.kind === "lite" ? "lite" : "standard";
+function formatSection(title, contexts, offset, connectedId) {
+  const width = Math.max(...contexts.map((context) => context.name.length), 0);
+  const rows = contexts.map((context, index) => {
+    const marker = context.id === connectedId ? "  (connected)" : "";
+    return `  ${offset + index + 1}. ${context.name.padEnd(width)}${marker}`.trimEnd();
+  });
+  return [title, ...rows].join("\n");
 }
 
-function formatList(contexts, connectedId) {
-  const width = Math.max(...contexts.map((context) => context.name.length), 0);
-  return contexts
-    .map((context, index) => {
-      const tags = [label(context)];
-      if (context.id === connectedId) {
-        tags.push("connected");
-      }
-      return `  ${index + 1}. ${context.name.padEnd(width)}  (${tags.join(", ")})`;
-    })
-    .join("\n");
+// The two kinds are listed apart, because they are different things: one comes
+// from the desktop app, one is the plugin's own. The numbering runs continuously
+// across both sections so `use <number>` still indexes the merged list the way
+// the user is reading it.
+function formatList(state) {
+  const standard = state.contexts.filter((context) => context.kind === "standard");
+  const blocks = [];
+  const connectedId = state.connected?.id ?? null;
+  if (standard.length > 0) {
+    blocks.push(
+      formatSection("Standard contexts (from NeatContext desktop):", standard, 0, connectedId)
+    );
+  }
+  if (state.lite.length > 0) {
+    blocks.push(
+      formatSection("Lite contexts (created here):", state.lite, standard.length, connectedId)
+    );
+  }
+  return blocks.join("\n\n");
+}
+
+function formatLiteList(state) {
+  return state.lite.length > 0
+    ? formatSection("Lite contexts (created here):", state.lite, 0, state.connected?.id ?? null)
+    : "  (none — create one with `/neatcontext:create`)";
 }
 
 function resolveContext(contexts, query) {
@@ -211,14 +230,16 @@ async function commandStatus(state) {
 }
 
 function commandList(state, { liteOnly }) {
-  const contexts = liteOnly ? state.lite : state.contexts;
-  const connectedId = state.connected?.id ?? null;
-
-  if (contexts.length === 0) {
-    if (liteOnly) {
+  if (liteOnly) {
+    if (state.lite.length === 0) {
       print("You have no lite contexts. Create one with `/neatcontext:create`.");
       return;
     }
+    print(formatLiteList(state));
+    return;
+  }
+
+  if (state.contexts.length === 0) {
     print("No contexts yet. Create a lite context with `/neatcontext:create`.");
     const note = appMissingNote(state);
     if (note) {
@@ -228,13 +249,11 @@ function commandList(state, { liteOnly }) {
     return;
   }
 
-  print(liteOnly ? "Your lite contexts:" : "Available contexts:");
-  print(formatList(contexts, connectedId));
-  if (!liteOnly) {
-    const note = appMissingNote(state);
-    if (note) {
-      print(note);
-    }
+  print(formatList(state));
+  const note = appMissingNote(state);
+  if (note) {
+    print("");
+    print(note);
   }
 }
 
@@ -249,15 +268,17 @@ async function commandUse(state, query) {
     return;
   }
   if (query.length === 0) {
-    print("Which context should I connect? Available contexts:");
-    print(formatList(contexts, state.connected?.id ?? null));
+    print("Which context should I connect?");
+    print("");
+    print(formatList(state));
     return;
   }
 
   const resolution = resolveContext(contexts, query);
   if (resolution.error) {
-    print(`No single context matched "${query}". Available contexts:`);
-    print(formatList(contexts, state.connected?.id ?? null));
+    print(`No single context matched "${query}".`);
+    print("");
+    print(formatList(state));
     const note = appMissingNote(state);
     if (note) {
       print(note);
@@ -344,12 +365,9 @@ async function commandCreate(flags) {
 
 async function commandDelete(state, query, flags) {
   if (query.length === 0) {
-    print("Which lite context should I delete? Your lite contexts:");
-    print(
-      state.lite.length > 0
-        ? formatList(state.lite, state.connected?.id ?? null)
-        : "  (none — create one with `/neatcontext:create`)"
-    );
+    print("Which lite context should I delete?");
+    print("");
+    print(formatLiteList(state));
     return;
   }
 
@@ -368,12 +386,9 @@ async function commandDelete(state, query, flags) {
       );
       return;
     }
-    print(`No single lite context matched "${query}". Your lite contexts:`);
-    print(
-      state.lite.length > 0
-        ? formatList(state.lite, state.connected?.id ?? null)
-        : "  (none — create one with `/neatcontext:create`)"
-    );
+    print(`No single lite context matched "${query}".`);
+    print("");
+    print(formatLiteList(state));
     return;
   }
 

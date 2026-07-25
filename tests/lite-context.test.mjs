@@ -313,12 +313,28 @@ describe("lite and standard side by side", () => {
     companion.state.version = 0;
   });
 
-  it("lists both kinds, labelled, in one numbered list", async () => {
+  it("lists the two kinds in their own sections", async () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");
 
-    assert.match(listed, /1\. payment team\s+\(standard\)/);
-    assert.match(listed, /3\. Payments Runbooks\s+\(lite\)/);
+    assert.match(listed, /Standard contexts \(from NeatContext desktop\):/);
+    assert.match(listed, /Lite contexts \(created here\):/);
+    // The kind is the section, so rows no longer repeat it.
+    assert.doesNotMatch(listed, /\(standard\)/);
+    assert.doesNotMatch(listed, /\(lite\)/);
+  });
+
+  it("numbers continuously across both sections, so `use <n>` still works", async () => {
+    await createContext("Payments Runbooks");
+    const listed = await cli("list");
+
+    // Two standard contexts from the fake companion, then the lite one.
+    assert.match(listed, /1\. payment team/);
+    assert.match(listed, /2\. Dokploy/);
+    assert.match(listed, /3\. Payments Runbooks/);
+
+    assert.match(await cli("use", "3"), /Connected the "Payments Runbooks" lite context/);
+    assert.match(await cli("use", "1"), /Connected the "payment team" context/);
   });
 
   it("drops the app's connection when a lite context is selected", async () => {
