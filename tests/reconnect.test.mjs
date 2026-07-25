@@ -149,7 +149,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
     await cli("use", "payment", "team");
     companion.restart();
 
-    assert.match(await cli("list"), /payment team\s+\(standard, connected\)/);
+    assert.match(await cli("list"), /Standard contexts.*\n.*payment team\s+\(connected\)/);
   });
 });
 
