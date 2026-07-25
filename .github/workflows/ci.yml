@@ -37,18 +37,42 @@ jobs:
       - run: npm run check
       - run: npm test --if-present
 
+  coverage:
+    # Every line a pull request adds to scripts/ has to be run by a test. Whole
+    # -file numbers are not the bar: plenty of this code predates the suite. The
+    # bar is that new code arrives with a test that exercises it.
+    name: diff coverage
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The gate diffs against the base commit, which a shallow clone of the
+          # merge ref does not have.
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: node tools/diff-coverage.mjs --base ${{ github.event.pull_request.base.sha }}
+
   ci:
     # One stable check for branch protection to require, so the matrix above can
     # gain or drop entries without anyone reconfiguring the protected branch.
     name: ci
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, coverage]
     if: always()
     steps:
       - name: Require every test job to have passed
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "test jobs finished with: ${{ needs.test.result }}"
+            exit 1
+          fi
+          # Skipped on a push to main, where there is no pull request to diff.
+          if [ "${{ needs.coverage.result }}" != "success" ] \
+            && [ "${{ needs.coverage.result }}" != "skipped" ]; then
+            echo "diff coverage finished with: ${{ needs.coverage.result }}"
             exit 1
           fi
           echo "All test jobs passed."
