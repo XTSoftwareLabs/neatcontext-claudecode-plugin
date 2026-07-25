@@ -137,6 +137,26 @@ describe("a session keeps its context when NeatContext restarts", () => {
     }
   });
 
+  it("is grounded from the handshake, before the host asks for anything", async () => {
+    // Restarting the host with a context already remembered must reconnect it
+    // during the handshake, so the first tools/list carries the extension tools
+    // rather than depending on which message the host happens to send first.
+    await cli("use", "payment", "team");
+    companion.restart();
+
+    const session = openSession();
+    try {
+      await session.handshake();
+      assert.deepEqual(companion.state.connected, {
+        contextId: "ctx-payments",
+        contextName: "payment team"
+      });
+      assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
+    } finally {
+      session.close();
+    }
+  });
+
   it("reports the restored context from /neatcontext:status", async () => {
     await cli("use", "payment", "team");
     companion.restart();

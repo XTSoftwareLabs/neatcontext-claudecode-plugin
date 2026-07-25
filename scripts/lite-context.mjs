@@ -304,6 +304,14 @@ export async function renderLiteContext(record) {
     "- This is a lite context: one profile, one knowledge folder, and no extension tools. " +
       "There is no other NeatContext evidence to fetch on this connection."
   );
+  // Session instructions are fixed at the handshake, so a session that started
+  // on a standard context and switched to this one is still carrying NeatContext's
+  // incident framing. This is the only place left that can speak, so it says so.
+  lines.push(
+    "- This is not an incident context unless the profile above says so. Any " +
+      "incident-response contract described at connection does not apply here: the " +
+      "domain profile defines the behavior and the shape of the answer."
+  );
 
   return lines.join("\n");
 }
