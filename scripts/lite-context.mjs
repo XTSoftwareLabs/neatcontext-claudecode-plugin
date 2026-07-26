@@ -96,6 +96,17 @@ export async function readLite(id) {
   return contexts.find((context) => context.id === id) ?? null;
 }
 
+// The profile as written. A routing description is derived from this text and
+// remembers its hash, so reading it back is how the plugin notices the user has
+// since rewritten the profile and left the description describing the old one.
+export async function readProfileText(record) {
+  try {
+    return await readFile(record.profilePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 async function directoryExists(target) {
   try {
     return (await stat(target)).isDirectory();
@@ -155,9 +166,15 @@ export async function createLite({ name, knowledgeFolder, profile }) {
     knowledgeFolder: folder
   };
 
+  // What actually lands on disk, which is not what the caller passed: it is
+  // trimmed and given exactly one terminating newline. Anything that later
+  // compares the profile against itself — a routing description remembering
+  // what it was derived from — has to hash this, not the input.
+  const profileText = `${cleanProfile}\n`;
+
   await mkdir(staging, { recursive: true });
   try {
-    await writeFile(path.join(staging, "profile.md"), `${cleanProfile}\n`, "utf8");
+    await writeFile(path.join(staging, "profile.md"), profileText, "utf8");
     await writeFile(
       path.join(staging, "context.json"),
       `${JSON.stringify(record, null, 2)}\n`,
@@ -171,6 +188,7 @@ export async function createLite({ name, knowledgeFolder, profile }) {
 
   return {
     record: recordFor(directory, record),
+    profileText,
     knowledgeFileCount: (await listKnowledgeFiles(folder)).files.length
   };
 }

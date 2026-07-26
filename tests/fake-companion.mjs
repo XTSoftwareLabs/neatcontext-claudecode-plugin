@@ -18,6 +18,12 @@ export const NEATCONTEXT_INSTRUCTIONS =
   "You are NeatContext AI, a local-first incident investigation assistant. " +
   "Always call get_context before answering an incident question.";
 
+// The plugin's own routing tools. They ride on every tool list, so the tests
+// that are about *extension* tools filter them out rather than restate them:
+// what those tests protect is which context's tools are exposed, and routing
+// tools belong to no context.
+export const ROUTING_TOOL_NAMES = ["use_context", "preview_context"];
+
 // Shuts a bridge process down the way Claude Code does — by closing its stdin —
 // and waits for it to go. Killing it would work for the assertions, but a
 // killed process never flushes its V8 coverage profile, and the diff-coverage
@@ -54,7 +60,17 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
     // Survives `restart()`, like the runtime file NeatContext leaves on disk:
     // it is why a disconnected app can still list an old context's tools.
     lastRuntimeContext: null,
-    puts: 0
+    puts: 0,
+    // Makes the MCP surface answer tools/list and tools/call with an error, the
+    // way a backend mid-restart does. The plugin decorates both of those, so it
+    // has to cope with a response that carries no tools and no content.
+    mcpError: false,
+    // Makes the app refuse to connect a context it is perfectly willing to
+    // list — a workspace that has been closed underneath it, say.
+    refuseConnect: false,
+    // Every `x-neatcontext-session` seen, in order. A real NeatContext keys its
+    // connections by this; the plugin has to actually send it.
+    sessionHeaders: []
   };
 
   const server = createServer((request, response) => {
@@ -73,6 +89,7 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
       if (request.headers.authorization !== `Bearer ${token}`) {
         return send(401, { error: "unauthorized" });
       }
+      state.sessionHeaders.push(request.headers["x-neatcontext-session"]);
       if (method === "GET" && url === "/v1/contexts") {
         return send(200, {
           contexts: state.contexts,
@@ -86,6 +103,7 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
         }
         if (method === "PUT") {
           state.puts += 1;
+          if (state.refuseConnect) return send(409, { error: "unavailable" });
           const context = state.contexts.find((entry) => entry.id === body?.contextId);
           if (!context) return send(404, { error: "unknown_context" });
           state.connected = { contextId: context.id, contextName: context.name };
@@ -130,6 +148,9 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
 function mcpResponse(state, message) {
   const id = message?.id ?? null;
   const ok = (result) => ({ jsonrpc: "2.0", id, result });
+  if (state.mcpError && message?.method !== "initialize") {
+    return { jsonrpc: "2.0", id, error: { code: -32603, message: "backend unavailable" } };
+  }
   if (message?.method === "initialize") {
     return ok({
       protocolVersion: "2025-06-18",

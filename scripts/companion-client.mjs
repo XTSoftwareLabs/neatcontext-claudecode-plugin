@@ -53,6 +53,28 @@ export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
 
+// Claude Code sets this per session, and everything the plugin runs inherits
+// it: the MCP bridge it spawns, and the slash commands that shell out. Absent —
+// an older host, or a direct CLI run — every session shares one selection, the
+// way they always did.
+export function sessionId() {
+  const id = process.env.CLAUDE_CODE_SESSION_ID;
+  return typeof id === "string" && id.trim().length > 0 ? id.trim() : null;
+}
+
+// One file per Claude Code window. A window is where a context belongs: you
+// open one to work on a thing, and the context is what that thing is. Sharing a
+// single selection meant connecting in one window silently re-grounded every
+// other, which is invisible from inside them.
+//
+// The global file above stays the *default* — what a window with no selection
+// of its own starts on — so restarting Claude Code still picks up the context
+// you were last using, and a pre-session plugin process still finds what it
+// expects to find.
+export function sessionSelectionFilePath(id) {
+  return path.join(path.dirname(discoveryFilePath()), "plugin-sessions", `${id}.json`);
+}
+
 export async function readDiscovery() {
   try {
     const raw = await readFile(discoveryFilePath(), "utf8");
@@ -66,9 +88,28 @@ export async function readDiscovery() {
   }
 }
 
+// This session's selection: its own if it has one, otherwise the default. A
+// session that has explicitly disconnected records that fact rather than
+// deleting its file, so it does not fall back to the default and silently
+// reconnect the context the user just dismissed.
 export async function readSelection() {
+  const id = sessionId();
+  if (id) {
+    const own = await readSelectionFrom(sessionSelectionFilePath(id));
+    if (own) {
+      return own.disconnected ? null : own;
+    }
+  }
+  const shared = await readSelectionFrom(selectionFilePath());
+  return shared && !shared.disconnected ? shared : null;
+}
+
+async function readSelectionFrom(file) {
   try {
-    const parsed = JSON.parse(await readFile(selectionFilePath(), "utf8"));
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    if (parsed?.disconnected === true) {
+      return { disconnected: true };
+    }
     // `contextId` is also accepted for a lite kind so a selection written by an
     // earlier build of this feature still resolves.
     const liteId =
@@ -101,16 +142,34 @@ export async function readSelection() {
   }
 }
 
-export async function writeSelection(selection) {
-  const file = selectionFilePath();
+async function writeJson(file, value) {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(selection, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600
-  });
+  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-export async function clearSelection() {
+// Written to both places: this session's file is what it will read back, and
+// the default is updated so the *next* window starts where this one left off.
+export async function writeSelection(selection) {
+  const id = sessionId();
+  if (id) {
+    await writeJson(sessionSelectionFilePath(id), selection);
+  }
+  await writeJson(selectionFilePath(), selection);
+}
+
+// `everywhere` separates the two reasons a selection goes away. Disconnecting
+// is about this window and must leave the default — and the other windows —
+// alone. A context that no longer exists is gone for everyone, so nothing
+// should keep trying to restore it.
+export async function clearSelection({ everywhere = false } = {}) {
+  const id = sessionId();
+  if (id && !everywhere) {
+    await writeJson(sessionSelectionFilePath(id), { disconnected: true }).catch(() => undefined);
+    return;
+  }
+  if (id) {
+    await rm(sessionSelectionFilePath(id), { force: true }).catch(() => undefined);
+  }
   await rm(selectionFilePath(), { force: true }).catch(() => undefined);
 }
 
@@ -118,11 +177,16 @@ export async function request(discovery, method, route, { body, timeoutMs = 4000
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const id = sessionId();
     const response = await fetch(`http://127.0.0.1:${discovery.port}${route}`, {
       method,
       signal: controller.signal,
       headers: {
         authorization: `Bearer ${discovery.token}`,
+        // Tells NeatContext whose connection this is about. A build of the app
+        // that predates it ignores the header and serves the one shared
+        // connection, which is what this plugin used to rely on anyway.
+        ...(id ? { "x-neatcontext-session": id } : {}),
         ...(body !== undefined ? { "content-type": "application/json" } : {})
       },
       body: body !== undefined ? JSON.stringify(body) : undefined
@@ -195,8 +259,8 @@ export async function ensureConnection(client) {
   const restored = await client.selectContext(remembered.contextId);
   if (restored.status !== 200) {
     // The context was deleted or renamed in NeatContext: stop trying to bring
-    // back something that no longer exists.
-    await clearSelection();
+    // back something that no longer exists — in this session or any other.
+    await clearSelection({ everywhere: true });
     return { connected: null, version, restored: false, restoreFailed: true };
   }
   const after = await client.getConnection();

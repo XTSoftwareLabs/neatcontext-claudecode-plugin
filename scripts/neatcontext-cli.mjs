@@ -4,8 +4,12 @@
 //   status                     show the connected context
 //   list [--lite]              list contexts (standard from the app, plus lite)
 //   use [query]                connect by number, exact name, or unique substring
+//   off                        disconnect this session's context
 //   create --name --knowledge  create a lite context (--profile-from <file>)
 //   delete <query> [--yes]     delete a lite context
+//   mode [auto|ask|manual]     how the session may route itself between contexts
+//   describe <query> --use-when   record what a context should be routed for
+//   alias <query> --called        record what the user calls a context
 //
 // Standard contexts are NeatContext desktop's and need the app open. Lite
 // contexts are the plugin's own and work with the app closed, so every lite
@@ -14,21 +18,25 @@
 // Exit code is always 0: the output is meant to be read, not branched on.
 
 import { readFile } from "node:fs/promises";
-import {
-  clearSelection,
-  connect,
-  ensureConnection,
-  NOT_RUNNING_MESSAGE,
-  readSelection,
-  writeSelection
-} from "./companion-client.mjs";
+import { clearSelection, ensureConnection, readSelection } from "./companion-client.mjs";
 import {
   createLite,
   deleteLite,
   LiteContextError,
   listKnowledgeFiles,
-  listLite
+  readProfileText
 } from "./lite-context.mjs";
+import {
+  addAlias,
+  isCardStale,
+  MODES,
+  putCard,
+  readRouting,
+  resolveMode,
+  sessionId,
+  setMode
+} from "./routing.mjs";
+import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
 
 const UPGRADE_NOTE =
   "A lite context holds one domain profile and one knowledge folder. For multiple " +
@@ -119,24 +127,6 @@ function formatLiteList(state) {
   );
 }
 
-function resolveContext(contexts, query) {
-  const trimmed = query.trim();
-  if (/^\d+$/.test(trimmed)) {
-    const context = contexts[Number(trimmed) - 1];
-    return context ? { context } : { error: "out_of_range" };
-  }
-  const lower = trimmed.toLowerCase();
-  const exact = contexts.filter((context) => context.name.toLowerCase() === lower);
-  if (exact.length === 1) {
-    return { context: exact[0] };
-  }
-  const partial = contexts.filter((context) => context.name.toLowerCase().includes(lower));
-  if (partial.length === 1) {
-    return { context: partial[0] };
-  }
-  return { error: partial.length > 1 || exact.length > 1 ? "ambiguous" : "not_found" };
-}
-
 // Everything the commands need about the world: both kinds of context, and what
 // is connected. The connection is read through `ensureConnection` so a
 // NeatContext restart — which drops the app's in-memory connection — is
@@ -144,33 +134,26 @@ function resolveContext(contexts, query) {
 // selection is authoritative on its own and needs no app at all.
 async function loadState() {
   const selection = await readSelection();
-  const lite = (await listLite()).map((context) => ({ ...context, kind: "lite" }));
+  const { contexts, lite, standard, client, appListed } = await listAllContexts();
 
-  const client = await connect();
-  let standard = [];
   let appState = null;
-  let appListed = false;
   if (client) {
     appState = await ensureConnection(client).catch(() => null);
-    const response = await client.listContexts();
-    if (response.status === 200) {
-      appListed = true;
-      standard = (response.json?.contexts ?? []).map((context) => ({ ...context, kind: "standard" }));
-      appState = appState ?? {
-        connected: response.json?.connected ?? null,
-        restored: false
-      };
-    }
+    appState = appState ?? { connected: null, restored: false };
   }
 
   let connected = null;
   if (selection?.kind === "lite") {
     const record = lite.find((context) => context.id === selection.contextId) ?? null;
+    const routing = await readRouting();
     connected = {
       kind: "lite",
       id: selection.contextId,
       name: record?.name ?? selection.contextName,
-      record
+      record,
+      stale: record
+        ? isCardStale(routing.cards[selection.contextId], await readProfileText(record))
+        : false
     };
   } else if (appState?.connected) {
     const id = appState.connected.contextId;
@@ -184,8 +167,9 @@ async function loadState() {
 
   return {
     client,
-    contexts: [...standard, ...lite],
+    contexts,
     lite,
+    standard,
     connected,
     appRunning: Boolean(client),
     appListed,
@@ -195,6 +179,22 @@ async function loadState() {
 
 async function commandStatus(state) {
   const { connected } = state;
+  const routing = await readRouting();
+  const mode = resolveMode(routing, sessionId());
+  // Reported alongside the connection because the two together are the whole
+  // answer to "what is this session going to do": what it is grounded in, and
+  // whether it may re-ground itself.
+  const reportMode = () => {
+    const staleCard = connected?.stale === true;
+    print(`Context routing: ${mode} (change with \`/neatcontext:mode\`)`);
+    if (staleCard) {
+      print(
+        "  This context's routing description was derived from an older version of its " +
+          "profile. Ask me to refresh it."
+      );
+    }
+  };
+
   if (connected?.kind === "lite") {
     if (!connected.record) {
       print(
@@ -215,6 +215,7 @@ async function commandStatus(state) {
       );
     }
     print("  Lite contexts have no extension tools.");
+    reportMode();
     return;
   }
 
@@ -224,6 +225,7 @@ async function commandStatus(state) {
         ? `Connected context: ${connected.name} (standard; NeatContext had restarted, the plugin reconnected it).`
         : `Connected context: ${connected.name} (standard)`
     );
+    reportMode();
     return;
   }
 
@@ -235,6 +237,7 @@ async function commandStatus(state) {
     return;
   }
   print("No context is connected yet. Use `/neatcontext:use` to pick one.");
+  reportMode();
 }
 
 function commandList(state, { liteOnly }) {
@@ -265,41 +268,145 @@ async function commandUse(state, query) {
   }
 
   const target = resolution.context;
-  if (target.kind === "lite") {
-    // The app must not stay bound to a standard context while a lite one is
-    // selected, or the two sources disagree about what is grounded.
-    if (state.client) {
-      await state.client.disconnect().catch(() => undefined);
-    }
-    // `liteContextId`, not `contextId`: see selectionFilePath() for why a lite
-    // selection has to be invisible to pre-lite plugin processes.
-    await writeSelection({ kind: "lite", liteContextId: target.id, contextName: target.name });
+  const result = await applySelection(target, state.client);
+  if (result.ok && result.kind === "lite") {
     print(
-      `Connected the "${target.name}" lite context. Your next messages in this session ` +
+      `Connected the "${result.name}" lite context. Your next messages in this session ` +
         "will be grounded in its domain profile and knowledge folder."
     );
+    await nudgeForDescription(target);
+    return;
+  }
+  if (result.ok) {
+    print(
+      `Connected the "${result.name}" context. Your next messages ` +
+        "in this session will be grounded in it."
+    );
+    await nudgeForDescription(target);
+    return;
+  }
+  // No "the app is not running" case here: a standard context can only be
+  // resolved from a list the app itself served, so by the time a target exists
+  // the client does too. Only the app refusing the connection is left.
+  print(`Could not connect "${target.name}". Try again from the app.`);
+}
+
+// Disconnecting is per window, which is the only scope that makes sense for it:
+// you are saying "not here", not "not anywhere". The default is left alone, so
+// other sessions keep their grounding and the next new one still starts on the
+// context you were last using.
+async function commandOff(state) {
+  if (!state.connected) {
+    print("No context is connected to this session.");
+    return;
+  }
+  const name = state.connected.name;
+  if (state.connected.kind === "standard" && state.client) {
+    await state.client.disconnect().catch(() => undefined);
+  }
+  await clearSelection();
+  print(`Disconnected "${name}" from this session. Nothing is grounding answers here now.`);
+  print("Connect another with `/neatcontext:use`, or reopen this one the same way.");
+  if (!sessionId()) {
+    // Without a session id there is only one selection to clear, so this did
+    // reach every window. Saying so beats letting them find out.
+    print("This Claude Code build does not identify sessions, so it applied everywhere.");
+  }
+}
+
+// A context with no routing description can only be routed to by name, which is
+// what makes a standard context — whose profile the plugin cannot read until it
+// is connected — much worse at routing than a lite one. Connecting is the
+// moment that changes: the document is readable now, and the session that ran
+// this command has a model to summarize it with. So the fix is to say so, here,
+// and let the session do it.
+async function nudgeForDescription(target) {
+  const routing = await readRouting();
+  if ((routing.cards[target.id]?.useWhen ?? "").length > 0) {
+    return;
+  }
+  print("");
+  print(
+    "This context has no routing description yet, so it can only be routed to by name. " +
+      "Derive one from what get_context returns, then record it with:"
+  );
+  print(`  neatcontext-cli.mjs describe "${target.name}" --use-when "<one line of scope>"`);
+}
+
+// Stores a routing description for a context that already exists. The line
+// itself is written by the session's model — this only records it, against the
+// text it was derived from so drift can be spotted later.
+async function commandDescribe(state, query, flags) {
+  const resolution = resolveContext(state.contexts, query);
+  if (resolution.error) {
+    print(`No single context matched "${query}".`);
+    return;
+  }
+  const useWhen = typeof flags["use-when"] === "string" ? flags["use-when"] : "";
+  if (useWhen.trim().length === 0) {
+    print("Pass the routing description with --use-when.");
+    return;
+  }
+  let source;
+  if (resolution.context.kind === "lite") {
+    source = (await readProfileText(resolution.context)) ?? undefined;
+  }
+  const card = await putCard(resolution.context.id, { useWhen, source });
+  print(`"${resolution.context.name}" now routes for: ${card.useWhen}`);
+}
+
+// Naming a context by hand is also the clearest correction signal there is: the
+// user is overriding whatever the session would have picked. `--called` records
+// the words they used for it, so the next session routes them correctly without
+// being told twice.
+async function commandAlias(state, query, flags) {
+  const resolution = resolveContext(state.contexts, query);
+  if (resolution.error) {
+    print(`No single context matched "${query}".`);
+    return;
+  }
+  const alias = typeof flags.called === "string" ? flags.called : "";
+  const recorded = await addAlias(resolution.context.id, alias);
+  if (!recorded) {
+    print("Pass the words to remember with --called.");
+    return;
+  }
+  print(`Noted — "${recorded}" now routes to "${resolution.context.name}".`);
+}
+
+async function commandMode(query, flags) {
+  const routing = await readRouting();
+  const id = sessionId();
+  if (query.length === 0) {
+    const active = resolveMode(routing, id);
+    const scope = MODES.includes(routing.sessions[id]?.mode) ? "this session" : "the default";
+    print(`Context routing is ${active} (${scope}).`);
+    print("");
+    print("  auto    switch context on a clear match, and say so; ask when it is a close call");
+    print("  ask     always ask before switching (default)");
+    print("  manual  never route — /neatcontext:use only");
+    print("");
+    print(`Change it with \`/neatcontext:mode <${MODES.join("|")}>\`.`);
     return;
   }
 
-  if (!state.client) {
-    print(NOT_RUNNING_MESSAGE);
+  const wanted = query.trim().toLowerCase();
+  if (!MODES.includes(wanted)) {
+    print(`"${query}" is not a mode. Use one of: ${MODES.join(", ")}.`);
     return;
   }
-  const selection = await state.client.selectContext(target.id);
-  if (selection.status === 200) {
-    // Remembered so the bridge can put the connection back if NeatContext is
-    // restarted while this session is still open.
-    await writeSelection({
-      kind: "standard",
-      contextId: target.id,
-      contextName: selection.json.contextName ?? target.name
-    }).catch(() => undefined);
+  const isGlobal = flags.global === true || flags.global === "true";
+  const result = await setMode(wanted, { global: isGlobal, id });
+  print(
+    result.scope === "global"
+      ? `Context routing is now ${wanted} everywhere (the default for new sessions).`
+      : `Context routing is now ${wanted} for this session.`
+  );
+  if (wanted === "auto") {
     print(
-      `Connected the "${selection.json.contextName}" context. Your next messages ` +
-        "in this session will be grounded in it."
+      "In auto mode this session switches context on its own, and tells you when it does. " +
+        "Other Claude Code windows keep theirs."
     );
-  } else {
-    print(`Could not connect "${target.name}". Try again from the app.`);
   }
 }
 
@@ -320,9 +427,26 @@ async function commandCreate(flags) {
   }
 
   try {
-    const { record, knowledgeFileCount } = await createLite({ name, knowledgeFolder: knowledge, profile });
+    const { record, profileText, knowledgeFileCount } = await createLite({
+      name,
+      knowledgeFolder: knowledge,
+      profile
+    });
+    // The routing line is derived from the profile by the model that ran this
+    // command, and stored against the profile it was derived from: edit the
+    // profile later and the hash stops matching, which is how a session finds
+    // out the line now describes something the context no longer is.
+    //
+    // `profileText`, not `profile` — the stored profile is normalized, and
+    // hashing the input would make every context stale from the moment it was
+    // created.
+    const useWhen = typeof flags["use-when"] === "string" ? flags["use-when"] : "";
+    await putCard(record.id, { useWhen, source: profileText });
     print(`Created the "${record.name}" lite context.`);
     print(`  Domain profile:   ${record.profilePath}`);
+    if (useWhen.trim().length > 0) {
+      print(`  Routes here for:  ${useWhen.trim()}`);
+    }
     print(
       `  Knowledge folder: ${record.knowledgeFolder}` +
         (knowledgeFileCount > 0 ? ` (${knowledgeFileCount} files)` : " (empty for now)")
@@ -387,7 +511,9 @@ async function commandDelete(state, query, flags) {
   print(`Deleted the "${deleted.name}" lite context.`);
   print(`Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`);
   if (state.connected?.id === deleted.id) {
-    await clearSelection();
+    // Everywhere, not just here: the context is gone from disk, so no window
+    // should be left holding a selection that can never resolve again.
+    await clearSelection({ everywhere: true });
     print("It was the connected context, so this session is no longer grounded in one.");
   }
 }
@@ -398,6 +524,12 @@ async function run() {
 
   if (command === "create") {
     await commandCreate(flags);
+    return;
+  }
+  // Reads no context list and touches no connection: the one command that still
+  // answers with the desktop app closed and nothing created yet.
+  if (command === "mode") {
+    await commandMode(query, flags);
     return;
   }
 
@@ -419,8 +551,23 @@ async function run() {
     await commandDelete(state, query, flags);
     return;
   }
+  if (command === "alias") {
+    await commandAlias(state, query, flags);
+    return;
+  }
+  if (command === "describe") {
+    await commandDescribe(state, query, flags);
+    return;
+  }
+  if (command === "off") {
+    await commandOff(state);
+    return;
+  }
 
-  print(`Unknown command "${command}". Use: status | list | use | create | delete.`);
+  print(
+    `Unknown command "${command}". ` +
+      "Use: status | list | use | off | create | delete | mode | alias | describe."
+  );
 }
 
 run()

@@ -10,10 +10,24 @@ import readline from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { NO_CONTEXT_TEXT, closeSession, startFakeCompanion } from "./fake-companion.mjs";
+import {
+  NO_CONTEXT_TEXT,
+  ROUTING_TOOL_NAMES,
+  closeSession,
+  startFakeCompanion
+} from "./fake-companion.mjs";
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 let companion;
+
+// Routing is per session, and these tests are not about it: an empty id pins
+// them to the global mode, so they behave the same in CI (where Claude Code has
+// set nothing) as under the Claude Code session that may be running them.
+const childEnv = () => ({
+  ...process.env,
+  CLAUDE_CODE_SESSION_ID: "",
+  NEATCONTEXT_COMPANION_FILE: companion.discoveryFile
+});
 
 before(async () => {
   companion = await startFakeCompanion();
@@ -28,13 +42,14 @@ beforeEach(async () => {
   companion.state.version = 0;
   companion.state.puts = 0;
   await rm(path.join(companion.directory, "plugin-selection.json"), { force: true });
+  await rm(path.join(companion.directory, "plugin-routing.json"), { force: true });
 });
 
 function cli(...args) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
-      env: { ...process.env, NEATCONTEXT_COMPANION_FILE: companion.discoveryFile }
+      env: childEnv()
     });
     let out = "";
     child.stdout.on("data", (chunk) => (out += chunk));
@@ -46,7 +61,7 @@ function cli(...args) {
 function openSession() {
   const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
-    env: { ...process.env, NEATCONTEXT_COMPANION_FILE: companion.discoveryFile }
+    env: childEnv()
   });
   const waiters = new Map();
   const notifications = [];
@@ -83,6 +98,12 @@ function openSession() {
     },
     getContext: () => send("tools/call", { name: "get_context", arguments: {} }),
     toolNames: async () => (await send("tools/list")).result.tools.map((tool) => tool.name),
+    // The tools that came from the connected context, which is what every
+    // assertion below is actually about.
+    contextToolNames: async () =>
+      (await send("tools/list")).result.tools
+        .map((tool) => tool.name)
+        .filter((name) => !ROUTING_TOOL_NAMES.includes(name)),
     close: () => closeSession(child)
   };
 }
@@ -114,11 +135,11 @@ describe("a session keeps its context when NeatContext restarts", () => {
     try {
       await session.handshake();
       await cli("use", "payment", "team");
-      assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context", "demo_ctx_payments"]);
 
       companion.restart();
 
-      assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context", "demo_ctx_payments"]);
     } finally {
       await session.close();
     }
@@ -151,7 +172,7 @@ describe("a session keeps its context when NeatContext restarts", () => {
         contextId: "ctx-payments",
         contextName: "payment team"
       });
-      assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context", "demo_ctx_payments"]);
     } finally {
       await session.close();
     }
@@ -226,7 +247,7 @@ describe("a session that never picked a context", () => {
     const session = openSession();
     try {
       await session.handshake();
-      assert.deepEqual(await session.toolNames(), ["get_context"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context"]);
     } finally {
       await session.close();
     }

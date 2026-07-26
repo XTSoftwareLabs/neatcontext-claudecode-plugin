@@ -48,5 +48,10 @@ flushes its profile. Tests end a bridge session by closing its stdin
 (`closeSession` in `tests/fake-companion.mjs`), which is what Claude Code does
 too; don't swap it back for `child.kill()`.
 
+The gate reads `git diff`, which does not see **untracked** files. A brand-new
+script is invisible to it — and so trivially "passes" — until you `git add` it.
+Stage new files before trusting a green run locally; CI diffs a pushed branch,
+where everything is tracked already.
+
 Please keep the plugin decoupled from NeatContext's internals: it should only
 use the documented public companion API (see the README).
