@@ -10,13 +10,27 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { NEATCONTEXT_INSTRUCTIONS, closeSession, startFakeCompanion } from "./fake-companion.mjs";
+import {
+  NEATCONTEXT_INSTRUCTIONS,
+  ROUTING_TOOL_NAMES,
+  closeSession,
+  startFakeCompanion
+} from "./fake-companion.mjs";
 
 const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 
 let home;
 let discoveryFile;
 let docs;
+
+// Routing is per session, and these tests are not about it: an empty id pins
+// them to the global mode, so they behave the same in CI (where Claude Code has
+// set nothing) as under the Claude Code session that may be running them.
+const childEnv = () => ({
+  ...process.env,
+  CLAUDE_CODE_SESSION_ID: "",
+  NEATCONTEXT_COMPANION_FILE: discoveryFile
+});
 
 before(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-lite-test-"));
@@ -36,13 +50,14 @@ after(async () => {
 beforeEach(async () => {
   await rm(path.join(home, "lite"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-selection.json"), { force: true });
+  await rm(path.join(home, "plugin-routing.json"), { force: true });
 });
 
 function cli(...args) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
-      env: { ...process.env, NEATCONTEXT_COMPANION_FILE: discoveryFile }
+      env: childEnv()
     });
     let out = "";
     child.stdout.on("data", (chunk) => (out += chunk));
@@ -97,6 +112,12 @@ function openSession() {
     },
     getContext: () => send("tools/call", { name: "get_context", arguments: {} }),
     toolNames: async () => (await send("tools/list")).result.tools.map((tool) => tool.name),
+    // The tools that came from the connected context — routing tools belong to
+    // no context and would only obscure what these assertions are about.
+    contextToolNames: async () =>
+      (await send("tools/list")).result.tools
+        .map((tool) => tool.name)
+        .filter((name) => !ROUTING_TOOL_NAMES.includes(name)),
     close: () => closeSession(child)
   };
 }
@@ -233,7 +254,7 @@ describe("a session grounded in a lite context", () => {
     const session = openSession();
     try {
       await session.handshake();
-      assert.deepEqual(await session.toolNames(), ["get_context"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context"]);
       assert.deepEqual((await session.send("prompts/list")).result.prompts, []);
     } finally {
       await session.close();
@@ -387,8 +408,9 @@ describe("lite and standard side by side", () => {
     try {
       const { instructions } = (await session.handshake()).result;
       // Forwarded intact, never rewritten: NeatContext owns the framing for its
-      // own contexts, the plugin owns it for lite ones.
-      assert.equal(instructions, NEATCONTEXT_INSTRUCTIONS);
+      // own contexts, the plugin owns it for lite ones. The routing menu is
+      // appended after it, and may not edit a word of what NeatContext said.
+      assert.ok(instructions.startsWith(NEATCONTEXT_INSTRUCTIONS));
     } finally {
       await session.close();
     }
@@ -477,11 +499,11 @@ describe("lite and standard side by side", () => {
     const session = openSession();
     try {
       await session.handshake();
-      assert.deepEqual(await session.toolNames(), ["get_context"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context"]);
 
       await cli("use", "payment team");
 
-      assert.deepEqual(await session.toolNames(), ["get_context", "demo_ctx_payments"]);
+      assert.deepEqual(await session.contextToolNames(), ["get_context", "demo_ctx_payments"]);
       assert.match(contextText(await session.getContext()), /Connected context: payment team/);
     } finally {
       await session.close();

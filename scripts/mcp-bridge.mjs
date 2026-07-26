@@ -31,7 +31,24 @@
 
 import readline from "node:readline";
 import { clientFor, ensureConnection, readDiscovery, readSelection, request } from "./companion-client.mjs";
-import { LITE_MISSING_MESSAGE, readLite, renderLiteContext } from "./lite-context.mjs";
+import {
+  LITE_MISSING_MESSAGE,
+  listKnowledgeFiles,
+  readLite,
+  renderLiteContext
+} from "./lite-context.mjs";
+import {
+  addAlias,
+  menuEntries,
+  noteDecision,
+  noteDeclined,
+  readRouting,
+  renderMenu,
+  resolveMode,
+  sessionId,
+  switchPolicy
+} from "./routing.mjs";
+import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
 
 const SERVER_INFO = { name: "neatcontext", version: "0.1.0" };
 const GET_CONTEXT_TOOL = {
@@ -45,6 +62,66 @@ const GET_CONTEXT_TOOL = {
 const OFFLINE_GET_CONTEXT =
   "NeatContext desktop is not reachable right now. Once it is running, use " +
   "/neatcontext:use to connect a Context, then ask again.";
+
+// The two tools that let a session change what it is grounded in. They are the
+// plugin's whole routing mechanism: there is no model in any process here, so
+// the session's own model does the routing, from the menu these tools act on.
+const USE_CONTEXT_TOOL = {
+  name: "use_context",
+  title: "Switch Context",
+  description:
+    "Switch this session to a different NeatContext Context, then call get_context and " +
+    "answer from what it returns. Name the context exactly as the routing menu lists it. " +
+    "In ask mode this only succeeds once the user has agreed — set `requested` then. Set " +
+    "`declined` instead of switching when the user turns a suggested switch down, so it is " +
+    "not suggested again.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      context: { type: "string", description: "The context to switch to, by name." },
+      reason: {
+        type: "string",
+        description: "One phrase: what in the request makes this the right context."
+      },
+      requested: {
+        type: "boolean",
+        description: "The user asked for this context by name, or agreed to the switch."
+      },
+      declined: {
+        type: "boolean",
+        description: "The user turned this switch down. Records it and switches nothing."
+      },
+      alias: {
+        type: "string",
+        description:
+          "What the user called this context or subject when correcting a wrong route. " +
+          "Remembered so the same words route correctly next time."
+      }
+    },
+    required: ["context"],
+    additionalProperties: false
+  }
+};
+
+const PREVIEW_CONTEXT_TOOL = {
+  name: "preview_context",
+  title: "Preview Context",
+  description:
+    "Look closer at a context before switching, when two of them are plausible and the " +
+    "routing menu is not enough to choose. Returns what the context covers and what is in " +
+    "its knowledge folder. Read-only: it changes nothing.",
+  inputSchema: {
+    type: "object",
+    properties: { context: { type: "string", description: "The context to preview, by name." } },
+    required: ["context"],
+    additionalProperties: false
+  }
+};
+
+const ROUTING_TOOLS = new Map([
+  [USE_CONTEXT_TOOL.name, USE_CONTEXT_TOOL],
+  [PREVIEW_CONTEXT_TOOL.name, PREVIEW_CONTEXT_TOOL]
+]);
 
 // Session instructions are fetched once, during the handshake, and MCP has no
 // way to change them afterwards. The recorded selection is on disk before the
@@ -221,6 +298,142 @@ function offlineResponse(message) {
   return { jsonrpc: "2.0", id, error: { code: -32601, message: OFFLINE_GET_CONTEXT } };
 }
 
+// --- Routing: the session picks its own context ------------------------------
+
+// What the model needs to route: every context that exists, one line each on
+// what it is for, and the rules for acting on that. Rebuilt on demand rather
+// than cached, so `/neatcontext:mode` and a context created mid-session both
+// take effect on the next call instead of on the next restart.
+async function routingMenu() {
+  const [{ contexts }, state] = await Promise.all([listAllContexts(), readRouting()]);
+  const selection = await readSelection().catch(() => null);
+  return renderMenu(menuEntries(contexts, state), {
+    connectedId: selection?.contextId ?? null,
+    mode: resolveMode(state, sessionId())
+  });
+}
+
+function toolText(id, text, isError = false) {
+  return jsonRpcResult(id, { content: [{ type: "text", text }], isError });
+}
+
+async function previewContext(id, target) {
+  const state = await readRouting();
+  const card = state.cards[target.id];
+  const lines = [`# ${target.name} (${target.kind})`, ""];
+  lines.push(card?.useWhen ? card.useWhen : "No routing description has been derived for it yet.");
+  if (card?.aliases?.length > 0) {
+    lines.push("", `Also called: ${card.aliases.join(", ")}`);
+  }
+  if (target.kind === "lite") {
+    const { files } = await listKnowledgeFiles(target.knowledgeFolder, { limit: 40 });
+    lines.push("", "Knowledge folder holds:", "");
+    lines.push(files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- (nothing yet)");
+  }
+  // Deliberately no profile prose. A profile is mostly behavioral, and text
+  // telling the model how to answer would be acting on this context while the
+  // session is still grounded in another one.
+  lines.push("", `Switch to it with use_context, or stay where you are.`);
+  return toolText(id, lines.join("\n"));
+}
+
+async function routingToolCall(message) {
+  const { id, params } = message;
+  const query = typeof params?.arguments?.context === "string" ? params.arguments.context : "";
+  const { contexts, client } = await listAllContexts();
+  const resolution = resolveContext(contexts, query);
+  if (resolution.error) {
+    return toolText(
+      id,
+      `No single context matched "${query}". The contexts are: ` +
+        `${contexts.map((context) => context.name).join(", ") || "(none)"}.`,
+      true
+    );
+  }
+  const target = resolution.context;
+  if (params.name === PREVIEW_CONTEXT_TOOL.name) {
+    return previewContext(id, target);
+  }
+
+  const args = params.arguments ?? {};
+  if (args.declined === true) {
+    await noteDeclined(target.id);
+    return toolText(
+      id,
+      `Noted — "${target.name}" will not be suggested again this session. Answer with the ` +
+        "context that is already connected."
+    );
+  }
+
+  const selection = await readSelection().catch(() => null);
+  const state = await readRouting();
+  const policy = switchPolicy(state, {
+    id: sessionId(),
+    targetId: target.id,
+    connectedId: selection?.contextId ?? null,
+    requested: args.requested === true
+  });
+
+  if (!policy.allowed) {
+    return toolText(id, refusal(policy, target), true);
+  }
+
+  const result = await applySelection(target, client);
+  if (!result.ok) {
+    // Not "the app is closed": the target was resolved from a list the app
+    // served moments ago, so the only failure left is the app declining.
+    return toolText(
+      id,
+      `NeatContext refused to connect "${target.name}". Stay on the current context and tell ` +
+        "the user the switch did not happen.",
+      true
+    );
+  }
+
+  // The alias is the only routing signal the user authors, and it arrives here
+  // because a wrong route is the moment they say what it should have been.
+  const alias = typeof args.alias === "string" ? await addAlias(target.id, args.alias) : null;
+  await noteDecision({
+    sessionId: sessionId(),
+    from: selection?.contextName ?? null,
+    to: target.name,
+    mode: policy.mode,
+    reason: typeof args.reason === "string" ? args.reason : null,
+    requested: args.requested === true
+  });
+
+  return toolText(
+    id,
+    `Switched this session to "${result.name}".` +
+      (alias ? ` "${alias}" will route here from now on.` : "") +
+      " Call get_context now and answer from what it returns. Tell the user in one line that " +
+      "you switched, and to what."
+  );
+}
+
+function refusal(policy, target) {
+  if (policy.reason === "already-connected") {
+    return `"${target.name}" is already the connected context. Nothing to switch.`;
+  }
+  if (policy.reason === "manual-mode") {
+    return (
+      "Context routing is off (manual mode). Do not switch. If the answer needs a different " +
+      `context, tell the user to run \`/neatcontext:use ${target.name}\`.`
+    );
+  }
+  if (policy.reason === "declined-this-session") {
+    return (
+      `The user already declined switching to "${target.name}" in this session. Do not ask ` +
+      "again — answer with the context that is connected, or say what it cannot cover."
+    );
+  }
+  return (
+    `Context routing is in ask mode, so nothing has changed yet. Ask the user whether to ` +
+    `switch to "${target.name}", say briefly why it looks like the right one, and call this ` +
+    "tool again with `requested: true` only if they agree."
+  );
+}
+
 // --- Bridge loop -------------------------------------------------------------
 
 const source = neatContextSource();
@@ -271,17 +484,29 @@ async function forward(message) {
 // kind — has to change this, so the extension tools of a standard context
 // appear and disappear live.
 async function currentVersion() {
+  // The mode is part of it: leaving manual has to make the routing tools appear
+  // without waiting for a restart, and entering it has to take them away.
+  const mode = resolveMode(await readRouting(), sessionId());
   const lite = await activeLite();
   if (lite) {
-    return lite.missing ? "lite:missing" : `lite:${lite.record.id}`;
+    return `${mode}/${lite.missing ? "lite:missing" : `lite:${lite.record.id}`}`;
   }
-  return (await source.ensure())?.version ?? null;
+  const version = (await source.ensure())?.version ?? null;
+  return version === null ? null : `${mode}/${version}`;
 }
 
 async function handleMessage(message) {
   const isNotification = message.id === undefined || message.id === null;
   if (message.method === "initialize") {
     lastInitialize = message;
+  }
+
+  // Routing tools belong to the plugin, not to either source: they decide which
+  // source serves the session next, so they are answered before that choice is
+  // made and are never forwarded to NeatContext.
+  if (message.method === "tools/call" && ROUTING_TOOLS.has(message.params?.name)) {
+    writeLine(await routingToolCall(message));
+    return;
   }
 
   const lite = await activeLite();
@@ -322,18 +547,75 @@ async function handleMessage(message) {
   }
 
   if (!isNotification && response) {
-    writeLine(shapeResponse(message, response, lite, state));
+    writeLine(await shapeResponse(message, response, lite, state));
   }
 }
 
-function shapeResponse(message, response, lite, state) {
+// The routing menu rides on both channels on purpose. In the handshake, so the
+// session knows what else exists without having to call anything; in every
+// get_context result, because that one is re-read on every call and the
+// handshake cannot be. Change the mode mid-session and the second channel is
+// what makes it take effect.
+async function withMenu(response, place) {
+  const menu = await routingMenu();
+  if (!menu) {
+    return response;
+  }
+  if (place === "instructions") {
+    const existing = response.result.instructions;
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        instructions: typeof existing === "string" ? `${existing}\n\n${menu}` : menu
+      }
+    };
+  }
+  const content = response.result?.content;
+  if (!Array.isArray(content) || content[0]?.type !== "text") {
+    return response;
+  }
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      content: [{ ...content[0], text: `${content[0].text}\n\n${menu}` }, ...content.slice(1)]
+    }
+  };
+}
+
+async function shapeResponse(message, response, lite, state) {
   if (message.method === "prompts/list") {
     return withoutHiddenPrompts(response);
   }
-  if (!lite && message.method === "tools/list") {
-    return withConnectedTools(response, state);
+  if (message.method === "initialize" && response.result) {
+    return withMenu(response, "instructions");
+  }
+  if (message.method === "tools/list") {
+    const connected = lite ? response : withConnectedTools(response, state);
+    return await withRoutingTools(connected);
+  }
+  if (message.method === "tools/call" && message.params?.name === GET_CONTEXT_TOOL.name) {
+    return withMenu(response, "content");
   }
   return response;
+}
+
+// Advertised in every mode but manual, where the absence of the tools is what
+// "never route" means — the session cannot switch by mistake because there is
+// nothing to call.
+async function withRoutingTools(response) {
+  if (!Array.isArray(response?.result?.tools)) {
+    return response;
+  }
+  const state = await readRouting();
+  if (resolveMode(state, sessionId()) === "manual") {
+    return response;
+  }
+  return {
+    ...response,
+    result: { ...response.result, tools: [...response.result.tools, ...ROUTING_TOOLS.values()] }
+  };
 }
 
 let watching = false;
