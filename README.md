@@ -23,12 +23,18 @@ what one person learned.
 
 | | Best for | What you get |
 |---|---|---|
+| **NeatContext lite context** | Reusing knowledge in fresh sessions or across a team | One domain profile that tells Claude how to work, plus one knowledge folder containing a session summary and focused files for decisions, guidance, troubleshooting, open items, or other durable knowledge. Lite contexts do not include extensions. |
+| **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
 | **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
-| **[Claude Code resume](https://code.claude.com/docs/en/sessions#resume-a-session)** | Continuing the same conversation | The original session and its conversation history |
-| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A focused, structured context containing the durable conclusions, decisions, guidance, and next steps |
 
 NeatContext does not copy the whole conversation. It keeps what will help Claude
 work accurately next time, without carrying over the entire chat.
+
+For enterprise-level context, use a **standard context** from
+[NeatContext Desktop](https://www.neatcontext.com). Like a lite context, each
+standard context has one domain profile. It can also use multiple knowledge
+folders with indexed retrieval and extensions for your team's tools. Standard
+contexts require NeatContext Desktop to be installed and open.
 
 ## Install
 
@@ -150,12 +156,14 @@ Run `/neatcontext:mode` without an argument to show the current mode. Add
 
 ## Context types
 
-- **Lite contexts** work locally without the NeatContext desktop app. Create
-  them from a conversation with `/neatcontext:save`, from an existing knowledge
-  folder with `/neatcontext:create`, or from a shared bundle with
-  `/neatcontext:import`.
-- **Standard contexts** are created and managed in the NeatContext desktop app.
-  Keep the app open while using them.
+- **Lite contexts** have one domain profile and one knowledge folder, with no
+  extensions. They work locally without NeatContext Desktop. Create them from a
+  conversation with `/neatcontext:save`, from an existing knowledge folder with
+  `/neatcontext:create`, or from a shared bundle with `/neatcontext:import`.
+- **Standard contexts** have one domain profile and support multiple indexed
+  knowledge folders and extensions. They are created and managed in
+  [NeatContext Desktop](https://www.neatcontext.com), which must be open while
+  you use them.
 
 ## License
 
