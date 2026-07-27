@@ -23,17 +23,11 @@ what one person learned.
 
 | | Best for | What you get |
 |---|---|---|
-| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> All these are auto generated. |
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> All these are auto generated. They are reusable knowledge, not plain conversation. See Context Types for more details. |
 | **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
 | **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
 
-> **Need enterprise-level context?** Use
-> [NeatContext Desktop](https://www.neatcontext.com) to create a standard
-> context. Each standard context has one domain profile, multiple knowledge
-> folders, and extensions that connect to internal and external systems.
-
-NeatContext does not copy the whole conversation. It keeps what will help Claude
-work accurately next time, without carrying over the entire chat.
+**NeatContext keeps what will help Claude work accurately next time, without carrying over the entire chat.**
 
 ## Install
 
