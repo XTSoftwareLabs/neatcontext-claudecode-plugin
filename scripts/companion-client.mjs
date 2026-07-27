@@ -88,28 +88,21 @@ export async function readDiscovery() {
   }
 }
 
-// This session's selection: its own if it has one, otherwise the default. A
-// session that has explicitly disconnected records that fact rather than
-// deleting its file, so it does not fall back to the default and silently
-// reconnect the context the user just dismissed.
+// This session's selection: its own if it has one, otherwise the default.
 export async function readSelection() {
   const id = sessionId();
   if (id) {
     const own = await readSelectionFrom(sessionSelectionFilePath(id));
     if (own) {
-      return own.disconnected ? null : own;
+      return own;
     }
   }
-  const shared = await readSelectionFrom(selectionFilePath());
-  return shared && !shared.disconnected ? shared : null;
+  return readSelectionFrom(selectionFilePath());
 }
 
 async function readSelectionFrom(file) {
   try {
     const parsed = JSON.parse(await readFile(file, "utf8"));
-    if (parsed?.disconnected === true) {
-      return { disconnected: true };
-    }
     // `contextId` is also accepted for a lite kind so a selection written by an
     // earlier build of this feature still resolves.
     const liteId =
@@ -157,27 +150,29 @@ export async function writeSelection(selection) {
   await writeJson(selectionFilePath(), selection);
 }
 
-// `everywhere` separates the two reasons a selection goes away. Disconnecting
-// is about this window and must leave the default — and the other windows —
-// alone. A context that no longer exists is gone for everyone, so nothing
-// should keep trying to restore it.
-export async function clearSelection({ everywhere = false } = {}) {
+// Only ever called for a context that no longer exists, which is gone for every
+// window: clearing this session's file alone would leave the default behind for
+// the next one to inherit.
+export async function clearSelection() {
   const id = sessionId();
-  if (id && !everywhere) {
-    await writeJson(sessionSelectionFilePath(id), { disconnected: true }).catch(() => undefined);
-    return;
-  }
   if (id) {
     await rm(sessionSelectionFilePath(id), { force: true }).catch(() => undefined);
   }
   await rm(selectionFilePath(), { force: true }).catch(() => undefined);
 }
 
-export async function request(discovery, method, route, { body, timeoutMs = 4000 } = {}) {
+// `shared` omits the session header, addressing the one connection an app keeps
+// for clients that do not identify a session. See `applySelection`.
+export async function request(
+  discovery,
+  method,
+  route,
+  { body, timeoutMs = 4000, shared = false } = {}
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const id = sessionId();
+    const id = shared ? null : sessionId();
     const response = await fetch(`http://127.0.0.1:${discovery.port}${route}`, {
       method,
       signal: controller.signal,
@@ -210,6 +205,8 @@ export function clientFor(discovery) {
     getConnection: () => request(discovery, "GET", "/v1/connection"),
     selectContext: (contextId) =>
       request(discovery, "PUT", "/v1/connection", { body: { contextId } }),
+    selectContextShared: (contextId) =>
+      request(discovery, "PUT", "/v1/connection", { body: { contextId }, shared: true }),
     disconnect: () => request(discovery, "DELETE", "/v1/connection"),
     getDocument: (opts) => request(discovery, "GET", "/v1/context", opts)
   };
@@ -260,7 +257,7 @@ export async function ensureConnection(client) {
   if (restored.status !== 200) {
     // The context was deleted or renamed in NeatContext: stop trying to bring
     // back something that no longer exists — in this session or any other.
-    await clearSelection({ everywhere: true });
+    await clearSelection();
     return { connected: null, version, restored: false, restoreFailed: true };
   }
   const after = await client.getConnection();

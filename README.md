@@ -16,7 +16,6 @@ There are two kinds of context:
 
 - `/neatcontext:list` — list the contexts you can connect, of both kinds.
 - `/neatcontext:use [context]` — connect a context to the current session.
-- `/neatcontext:off` — disconnect this session's context, grounding nothing.
 - `/neatcontext:status` — show which context is connected.
 - `/neatcontext:create` — create a lite context, in three questions.
 - `/neatcontext:delete [context]` — delete a lite context.
