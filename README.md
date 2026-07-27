@@ -53,19 +53,25 @@ Suppose you work through a difficult production issue with Claude:
 You: Some orders take ten minutes to update, but overall queue lag looks normal.
      Help me investigate.
 
-Claude: The delay affects only one partition. Its consumer is spending most of
-        its time deserializing a small number of unusually large events.
+Claude: Let's correlate Order API traces, the order-events consumer metrics,
+        and the order-projection worker logs. Start with per-partition lag
+        instead of the aggregate metric.
 
-You: Those events come from bulk catalog updates. They all use the same tenant
-     ID as the partition key. Could that explain the pattern?
+You: Grafana shows that partition 17 is falling behind while the others are
+     healthy. Tempo traces show the Order API publishes events without delay.
 
-Claude: Yes. The shared key sends every bulk update to one partition. Large
-        payloads then block later order events in that partition, while the
-        aggregate lag metric hides the hotspot.
+Claude: Check the Loki logs for the order-projection workers on partition 17.
+        Look for deserialization time, payload size, and the producing service.
 
-You: We confirmed it. Splitting the bulk updates removed the delay. In future,
-     check per-partition lag, event size, partition keys, and deserialization
-     time before scaling consumers.
+You: The worker logs show 12-second deserialization times for large events from
+     catalog-sync. Its logs confirm that bulk updates for tenant-42 all use the
+     same partition key. Splitting those updates cleared the lag.
+
+Claude: The root cause was a hot partition: large catalog-sync events blocked
+        later order events, while the aggregate lag metric hid the problem. For
+        similar issues, check per-partition lag, traces from the producing
+        service, worker deserialization logs, payload size, and partition keys
+        before scaling consumers.
 
 You: /neatcontext:save event-partition-investigation
 
