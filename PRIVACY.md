@@ -3,7 +3,7 @@
 **Effective date: July 28, 2026**
 
 This policy describes how the NeatContext plugin for Claude Code
-("the plugin"), published by XTSoftwareLabs, handles information. It applies
+("the plugin"), published by XT SOFTWARE LABS LLC, handles information. It applies
 only to the open-source plugin in this repository. Claude Code, Anthropic
 services, the NeatContext desktop app, and third-party services configured
 through NeatContext have their own terms and privacy practices.
@@ -11,9 +11,9 @@ through NeatContext have their own terms and privacy practices.
 ## Summary
 
 - The plugin does not send telemetry, analytics, crash reports, or advertising
-  data to XTSoftwareLabs.
-- The plugin does not require an XTSoftwareLabs account and does not use an
-  XTSoftwareLabs-operated cloud service.
+  data to XT SOFTWARE LABS LLC.
+- The plugin does not require an XT SOFTWARE LABS LLC account and does not use
+  an XT SOFTWARE LABS LLC-operated cloud service.
 - Lite contexts and operational state are stored on your computer.
 - Content is provided to Claude Code when you invoke plugin features or connect
   a context, so that content is handled according to the terms, privacy policy,
@@ -70,7 +70,7 @@ be repaired; you can delete it manually at any time.
 ## Network communication and disclosure
 
 The plugin itself has no telemetry endpoint and does not transmit information
-to an XTSoftwareLabs-operated server.
+to an XT SOFTWARE LABS LLC-operated server.
 
 The following communications can occur:
 
