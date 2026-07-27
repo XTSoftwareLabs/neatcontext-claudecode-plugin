@@ -8,7 +8,11 @@
   "plugins": [
     {
       "name": "neatcontext",
-      "source": "./",
+      "source": {
+        "source": "github",
+        "repo": "XTSoftwareLabs/neatcontext-plugins",
+        "ref": "v0.2.1"
+      },
       "description": "Save conversations as reusable lite contexts, create fresh ones, or connect standard contexts from NeatContext desktop.",
       "author": {
         "name": "XTSoftwareLabs",
