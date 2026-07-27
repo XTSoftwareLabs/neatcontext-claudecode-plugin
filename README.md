@@ -1,6 +1,6 @@
 # NeatContext for Claude Code
 
-[![CI](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/package-json/v/XTSoftwareLabs/neatcontext-plugins)](package.json) [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json) [![License](https://img.shields.io/github/license/XTSoftwareLabs/neatcontext-plugins)](LICENSE)
+[![CI](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/package-json/v/XTSoftwareLabs/neatcontext-plugins)](package.json) [![License](https://img.shields.io/github/license/XTSoftwareLabs/neatcontext-plugins)](LICENSE)
 
 Extract domain knowledge and save useful work from a Claude Code conversation
 as structured, reusable context that you can use in later sessions or share
