@@ -9,8 +9,8 @@
     {
       "name": "neatcontext",
       "source": {
-        "source": "github",
-        "repo": "XTSoftwareLabs/neatcontext-plugins",
+        "source": "url",
+        "url": "https://github.com/XTSoftwareLabs/neatcontext-plugins.git",
         "ref": "v0.2.1"
       },
       "description": "Save Claude Code work as reusable, domain-aware context",

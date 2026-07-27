@@ -39,7 +39,7 @@ what one person learned.
 In Claude Code, run:
 
 ```text
-/plugin marketplace add XTSoftwareLabs/neatcontext-plugins
+/plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
 /plugin install neatcontext@neatcontext
 ```
 
