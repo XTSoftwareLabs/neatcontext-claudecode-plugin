@@ -1,6 +1,7 @@
 ---
 description: Create a lite NeatContext context from here, no desktop app needed
-allowed-tools: Bash(node:*), Write
+disable-model-invocation: true
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*), Write
 ---
 
 Guide the user through creating a **lite context**: one domain profile, one

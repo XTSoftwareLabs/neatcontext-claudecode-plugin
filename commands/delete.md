@@ -1,7 +1,8 @@
 ---
 description: Delete a lite NeatContext context
 argument-hint: [lite context name or number]
-allowed-tools: Bash(node:*)
+disable-model-invocation: true
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 Delete a lite context. Standard contexts cannot be deleted from here — they are

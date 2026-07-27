@@ -55,12 +55,26 @@ jobs:
           node-version: "22"
       - run: node tools/diff-coverage.mjs --base ${{ github.event.pull_request.base.sha }}
 
+  marketplace:
+    name: marketplace validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      # The community marketplace review pipeline uses Claude Code's validator.
+      # Use its current release here so schema changes fail before submission.
+      - run: npm install --global @anthropic-ai/claude-code@latest
+      - run: npm run validate:plugin
+
   ci:
     # One stable check for branch protection to require, so the matrix above can
     # gain or drop entries without anyone reconfiguring the protected branch.
     name: ci
     runs-on: ubuntu-latest
-    needs: [test, coverage]
+    needs: [test, coverage, marketplace]
     if: always()
     steps:
       - name: Require every test job to have passed
@@ -75,4 +89,8 @@ jobs:
             echo "diff coverage finished with: ${{ needs.coverage.result }}"
             exit 1
           fi
-          echo "All test jobs passed."
+          if [ "${{ needs.marketplace.result }}" != "success" ]; then
+            echo "marketplace validation finished with: ${{ needs.marketplace.result }}"
+            exit 1
+          fi
+          echo "All CI jobs passed."

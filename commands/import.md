@@ -2,7 +2,7 @@
 description: Import a conversation context bundle shared by a teammate
 argument-hint: [bundle folder]
 disable-model-invocation: true
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 Import a self-contained lite context bundle previously created with
