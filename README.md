@@ -88,9 +88,10 @@ Claude: The root cause was a hot partition: large catalog-sync events blocked
         similar issues, check per-partition lag, traces from the producing
         service, worker deserialization logs, payload size, and partition keys
         before scaling consumers.
+```
+This is the useful work you may want to save. Run `/neatcontext:save event-partition-investigation`:
 
-You: /neatcontext:save event-partition-investigation
-
+```text
 Claude:
 Lite context folder: <folder>
 Profile path: <folder>/profile.md
@@ -102,7 +103,7 @@ The saved context keeps the investigation approach, system knowledge, findings,
 and verified resolution—not the raw conversation.
 
 When a similar issue appears later, connect the saved context in a new Claude
-Code session. The NeatContext plugin can also route you to the right context in
+Code session by using `/neatcontext:use`. The NeatContext plugin can also route you to the right context in
 `auto` or `ask` mode.
 
 ```text
