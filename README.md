@@ -87,8 +87,7 @@ and verified resolution—not the raw conversation.
 
 When a similar issue appears later, connect the saved context in a new Claude
 Code session. The NeatContext plugin can also route you to the right context in
-`auto` or `ask` mode: `auto` switches on a clear match, while `ask` asks for
-your approval first.
+`auto` or `ask` mode.
 
 ```text
 You: /neatcontext:use event-partition-investigation
