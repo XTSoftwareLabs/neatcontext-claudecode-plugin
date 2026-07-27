@@ -16,7 +16,7 @@
 //
 // Override the discovery file location with NEATCONTEXT_COMPANION_FILE.
 
-import { copyFile as copyFileRaw, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { sessionId } from "./session.mjs";
@@ -34,11 +34,9 @@ export function discoveryFilePath() {
   return path.join(homedir(), ".neatcontext", "companion.json");
 }
 
-// NeatContext holds the connected context in memory for as long as the app is
-// open, so quitting or restarting it drops the connection. The plugin records
-// the selection here so it can put the connection back instead of leaving a
-// running session silently ungrounded. Lives beside the discovery file, which
-// keeps NEATCONTEXT_COMPANION_FILE a single override for both.
+// A host that provides no session identity retains the original single-session
+// store. Session-aware hosts never use this as a default: inheriting it would
+// make a brand-new session start with an unrelated session's context.
 //
 // For a lite context (kind: "lite") this file is not a recovery record but the
 // authority: there is no app holding that connection in memory.
@@ -54,15 +52,10 @@ export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
 
-// One file per host session. A session is where a context belongs: you
-// open one to work on a thing, and the context is what that thing is. Sharing a
-// single selection meant connecting in one window silently re-grounded every
-// other, which is invisible from inside them.
-//
-// The global file above stays the *default* — what a window with no selection
-// of its own starts on — so restarting the host still picks up the context
-// you were last using, and a pre-session plugin process still finds what it
-// expects to find.
+// One file per host session. A session is where a context belongs: you open one
+// to work on a thing, and the context is what that thing is. A new session has
+// no file and therefore no context. Resuming the same session finds its own file
+// and can restore its own context without borrowing one from another session.
 export function sessionSelectionFilePath(id) {
   return path.join(path.dirname(discoveryFilePath()), "plugin-sessions", `${id}.json`);
 }
@@ -80,38 +73,16 @@ export async function readDiscovery() {
   }
 }
 
-// This session's selection: its own if it has one, otherwise the default —
-// which it then *keeps*.
-//
-// Inheriting the default on every read instead of once is what made a switch in
-// one window move another. A window that has never run /neatcontext:use has no
-// file of its own, so it re-read the shared default each time; the moment any
-// other window connected something, that default changed underneath it and it
-// silently followed. Two windows, and only one of them ever chose anything.
-//
-// Snapshotting the default into this session's own file on first read fixes it
-// without giving up the thing the default is for: a new session still starts on
-// the context you were last using, so restarting the host picks up where you
-// left off. It just stops tracking that value afterwards.
+// A session-aware host reads only this session's selection. In particular, a
+// missing file is meaningful: this is a clean session that has not connected a
+// context yet. Falling back to the session-less store here would leak the last
+// session's context into every new one.
 export async function readSelection() {
   const id = sessionId();
   if (!id) {
     return readSelectionFrom(selectionFilePath());
   }
-  const own = await readSelectionFrom(sessionSelectionFilePath(id));
-  if (own) {
-    return own;
-  }
-  const inherited = await readSelectionFrom(selectionFilePath());
-  if (inherited) {
-    // Copied verbatim rather than re-serialized from the parsed form, which
-    // would turn a lite selection's `liteContextId` into a plain `contextId` —
-    // the one field shape `selectionFilePath` explains must stay as written.
-    // Best-effort: grounding must not fail because a snapshot could not be
-    // written, and an unpinned session still reads the right context today.
-    await copyFile(selectionFilePath(), sessionSelectionFilePath(id));
-  }
-  return inherited;
+  return readSelectionFrom(sessionSelectionFilePath(id));
 }
 
 async function readSelectionFrom(file) {
@@ -154,32 +125,26 @@ async function writeJson(file, value) {
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-async function copyFile(from, to) {
-  try {
-    await mkdir(path.dirname(to), { recursive: true });
-    await copyFileRaw(from, to);
-  } catch {
-    // Nothing to pin, or nowhere to pin it: the caller already has the value.
-  }
-}
-
-// Written to both places: this session's file is what it will read back, and
-// the default is updated so the *next* window starts where this one left off.
+// A session-aware host writes only this session's file. The shared file remains
+// solely for hosts that cannot identify sessions and therefore cannot isolate
+// them.
 export async function writeSelection(selection) {
   const id = sessionId();
   if (id) {
     await writeJson(sessionSelectionFilePath(id), selection);
+    return;
   }
   await writeJson(selectionFilePath(), selection);
 }
 
-// Only ever called for a context that no longer exists, which is gone for every
-// window: clearing this session's file alone would leave the default behind for
-// the next one to inherit.
+// Clear only the current session. Other sessions may still be using the same
+// standard context; lite-context deletion handles their now-missing records when
+// those sessions next read them.
 export async function clearSelection() {
   const id = sessionId();
   if (id) {
     await rm(sessionSelectionFilePath(id), { force: true }).catch(() => undefined);
+    return;
   }
   await rm(selectionFilePath(), { force: true }).catch(() => undefined);
 }

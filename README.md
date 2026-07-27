@@ -36,11 +36,9 @@ The plugin does not surface NeatContext's `analyze_incident` prompt. A context
 is whatever you made it, and many are not about incidents at all, so an
 incident-shaped command in the menu would misrepresent what is connected.
 
-Each session is also framed by the context it starts with, so restarting Claude
-Code with a context already connected picks up where you left off — you don't
-have to run `/neatcontext:use` again. A **standard** context is framed by
-NeatContext, a **lite** context by the plugin, in plain terms that assume nothing
-about your subject area.
+After a session connects a context, that context also frames the session. A
+**standard** context is framed by NeatContext, a **lite** context by the plugin,
+in plain terms that assume nothing about your subject area.
 
 ## Switching contexts on its own
 
@@ -70,8 +68,9 @@ When it does get one wrong, correcting it teaches it: say what you actually
 meant and the words you used are remembered for next time.
 
 Each Claude Code window holds its **own** context, so switching in one leaves the
-others alone. A new window starts on whichever context was connected last, so
-restarting still picks up where you left off.
+others alone. A new session starts with no context; it connects one only through
+`/neatcontext:use` or the routing policy. Resuming an existing session restores
+that session's own selection.
 
 > Standard contexts need a NeatContext desktop build that keys connections by
 > session. Against an older build the plugin still works, but every window
@@ -199,12 +198,12 @@ surface. The bridge only speaks:
   with `NEATCONTEXT_COMPANION_FILE`) and a token-gated `POST /v1/mcp` plus a few
   read endpoints (`/v1/health`, `/v1/contexts`, `/v1/connection`).
 
-The context you pick is recorded next to the discovery file: in
-`~/.neatcontext/plugin-sessions/<session>.json` for the window you picked it in,
-and in `~/.neatcontext/plugin-selection.json` as the default a new window starts
-on. Each holds a kind, a context id, and a name, nothing else. For a standard
-context this is what lets the plugin reconnect after NeatContext is restarted;
-for a lite context it *is* the connection, since no app is holding one.
+The context you pick is recorded next to the discovery file in
+`~/.neatcontext/plugin-sessions/<session>.json` for the session where you picked
+it. Each record holds a kind, a context id, and a name, nothing else. A new
+session has no record and starts unconnected. For a standard context the record
+lets the plugin reconnect that session after NeatContext is restarted; for a
+lite context it *is* the connection, since no app is holding one.
 
 Requests to NeatContext carry an `x-neatcontext-session` header so the app can
 keep each window's connection separate.

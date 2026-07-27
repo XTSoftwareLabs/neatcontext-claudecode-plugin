@@ -101,7 +101,11 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
       if (request.headers.authorization !== `Bearer ${token}`) {
         return send(401, { error: "unauthorized" });
       }
-      state.sessionHeaders.push(request.headers["x-neatcontext-session"]);
+      const session = request.headers["x-neatcontext-session"];
+      state.sessionHeaders.push(session);
+      // Match the real companion's session-keyed view. `connected` remains the
+      // most recent request's view for tests that inspect it directly.
+      state.connected = state.bySession.get(session) ?? null;
       if (method === "GET" && url === "/v1/contexts") {
         return send(200, {
           contexts: state.contexts,
@@ -119,19 +123,20 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
           const context = state.contexts.find((entry) => entry.id === body?.contextId);
           if (!context) return send(404, { error: "unknown_context" });
           state.connected = { contextId: context.id, contextName: context.name };
-          state.bySession.set(request.headers["x-neatcontext-session"], state.connected);
+          state.bySession.set(session, state.connected);
           state.lastRuntimeContext = context;
           state.version += 1;
           return send(200, { contextId: context.id, contextName: context.name });
         }
         if (method === "DELETE") {
           state.connected = null;
+          state.bySession.delete(session);
           state.version += 1;
           return send(204);
         }
       }
       if (method === "POST" && url === "/v1/mcp") {
-        return send(200, mcpResponse(state, body));
+        return send(200, mcpResponse(state, body, state.connected));
       }
       return send(404, { error: "not_found" });
     })();
@@ -152,13 +157,14 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
     // the runtime file (and so the advertised tool list) is not.
     restart() {
       state.connected = null;
+      state.bySession.clear();
       state.version = 0;
     },
     stop: () => new Promise((resolve) => server.close(resolve))
   };
 }
 
-function mcpResponse(state, message) {
+function mcpResponse(state, message, connected) {
   const id = message?.id ?? null;
   const ok = (result) => ({ jsonrpc: "2.0", id, result });
   if (state.mcpError && message?.method !== "initialize") {
@@ -191,8 +197,8 @@ function mcpResponse(state, message) {
     });
   }
   if (message?.method === "tools/call" && message.params?.name === "get_context") {
-    const text = state.connected
-      ? `Connected context: ${state.connected.contextName}`
+    const text = connected
+      ? `Connected context: ${connected.contextName}`
       : NO_CONTEXT_TEXT;
     return ok({ content: [{ type: "text", text }], isError: false });
   }

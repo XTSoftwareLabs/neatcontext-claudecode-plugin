@@ -38,6 +38,7 @@ after(async () => {
 });
 beforeEach(async () => {
   companion.state.connected = null;
+  companion.state.bySession.clear();
   companion.state.lastRuntimeContext = null;
   companion.state.version = 0;
   companion.state.puts = 0;

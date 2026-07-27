@@ -465,6 +465,7 @@ describe("lite and standard side by side", () => {
   });
   beforeEach(() => {
     companion.state.connected = null;
+    companion.state.bySession.clear();
     companion.state.version = 0;
   });
 
