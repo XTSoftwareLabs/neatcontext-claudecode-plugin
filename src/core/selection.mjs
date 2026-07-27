@@ -67,7 +67,7 @@ export async function applySelection(target, client) {
     if (client) {
       await client.disconnect().catch(() => undefined);
     }
-    // `liteContextId`, not `contextId`: see selectionFilePath() for why a lite
+    // `liteContextId`, not `contextId`: see companion-client.mjs for why a lite
     // selection has to be invisible to pre-lite plugin processes.
     await writeSelection({ kind: "lite", liteContextId: target.id, contextName: target.name });
     return { ok: true, kind: "lite", name: target.name };

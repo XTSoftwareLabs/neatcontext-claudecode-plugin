@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -74,8 +74,8 @@ after(async () => {
 beforeEach(async () => {
   await rm(path.join(home, "lite"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-selection.json"), { force: true });
-  // Each session's own selection outlives the default now, so a session id
-  // reused by the next test would otherwise start where the last one finished.
+  // A session id reused by the next test would otherwise resume that session's
+  // selection.
   await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
   await rm(routingFile, { force: true });
   companion.state.connected = null;
@@ -700,7 +700,9 @@ describe("how the session is told to connect", () => {
 describe("use_context", () => {
   beforeEach(async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds and chargebacks" });
-    await cli("use", "Payments");
+    for (const session of ["s-auto", "s-ask", "s-manual"]) {
+      await cli({ session }, "use", "Payments");
+    }
   });
 
   it("switches, in auto mode, and hands the session straight to get_context", async () => {
@@ -716,7 +718,7 @@ describe("use_context", () => {
       assert.match(result, /Tell the user in one line that you switched/);
 
       assert.match(text(await session.getContext()), /Connected context: payment team/);
-      assert.match(await cli("status"), /Connected context: payment team/);
+      assert.match(await cli({ session: "s-auto" }, "status"), /Connected context: payment team/);
     } finally {
       await session.close();
     }
@@ -731,7 +733,7 @@ describe("use_context", () => {
       assert.match(text(refused), /ask mode, so nothing has changed yet/);
       assert.match(text(refused), /`requested: true` only if they agree/);
       // The load-bearing part: the refusal is not advisory.
-      assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+      assert.match(await cli({ session: "s-ask" }, "status"), /Payments Runbooks \(lite\)/);
 
       const agreed = await session.call("use_context", {
         context: "payment team",
@@ -751,7 +753,7 @@ describe("use_context", () => {
       const refused = await session.call("use_context", { context: "payment team" });
       assert.match(text(refused), /routing is off \(manual mode\)/);
       assert.match(text(refused), /\/neatcontext:use payment team/);
-      assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+      assert.match(await cli({ session: "s-manual" }, "status"), /Payments Runbooks \(lite\)/);
     } finally {
       await session.close();
     }
@@ -767,7 +769,7 @@ describe("use_context", () => {
         declined: true
       });
       assert.match(text(noted), /will not be suggested again this session/);
-      assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+      assert.match(await cli({ session: "s-auto" }, "status"), /Payments Runbooks \(lite\)/);
 
       const retried = await session.call("use_context", { context: "payment team" });
       assert.match(text(retried), /already declined switching/);
@@ -823,7 +825,7 @@ describe("use_context", () => {
       assert.match(text(result), /refused to connect "payment team"/);
       assert.match(text(result), /Stay on the current context/);
       // A failed switch must not leave the session believing it moved.
-      assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+      assert.match(await cli({ session: "s-auto" }, "status"), /Payments Runbooks \(lite\)/);
       assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
     } finally {
       await session.close();
@@ -922,12 +924,18 @@ describe("applying a selection", () => {
   it("selects a lite context with the app closed", async () => {
     await createContext("Payments Runbooks");
     const { lite } = await listAllContexts();
-    assert.deepEqual(await applySelection(lite[0], null), {
-      ok: true,
-      kind: "lite",
-      name: "Payments Runbooks"
-    });
-    assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+    const previous = process.env.CLAUDE_CODE_SESSION_ID;
+    process.env.CLAUDE_CODE_SESSION_ID = "";
+    try {
+      assert.deepEqual(await applySelection(lite[0], null), {
+        ok: true,
+        kind: "lite",
+        name: "Payments Runbooks"
+      });
+      assert.match(await cli("status"), /Payments Runbooks \(lite\)/);
+    } finally {
+      process.env.CLAUDE_CODE_SESSION_ID = previous;
+    }
   });
 });
 
@@ -935,51 +943,34 @@ describe("applying a selection", () => {
 // context is what that thing is. Sharing one selection meant connecting in one
 // window silently re-grounded every other, invisibly from inside them.
 describe("a context per session", () => {
-  // The reported failure, and the reason it was so easy to miss: it needs a
-  // window that has never picked a context of its own. That window had no file,
-  // so it re-read the shared default on *every* call — and the moment any other
-  // window connected something, the default changed underneath it and it
-  // silently followed. Both windows then answered from one context while
-  // reporting two.
+  // A new session is deliberately blank. Existing sessions retain only their
+  // own selections, so neither startup nor a later switch can leak a context
+  // between windows.
   it("does not follow another window that switches afterwards", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
 
-    // win-b never runs `use`. It inherits the default — once.
-    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+    // win-b never runs `use`, so it starts and stays unconnected.
+    assert.match(await cli({ session: "win-b" }, "status"), /No context is connected/);
 
     await cli({ session: "win-a" }, "use", "payment team");
 
-    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+    assert.match(await cli({ session: "win-b" }, "status"), /No context is connected/);
     assert.match(await cli({ session: "win-a" }, "status"), /payment team \(standard\)/);
   });
 
-  it("still grounds the session when the pin cannot be written", async () => {
-    await createContext("Payments Runbooks", { useWhen: "refunds" });
-    await cli({ session: "win-a" }, "use", "Payments");
-    // A file where the directory has to go: pinning cannot succeed.
-    await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
-    await writeFile(path.join(home, "plugin-sessions"), "not a directory");
-
-    // Grounding is the point; the pin is an optimisation on top of it, and a
-    // session that cannot pin must still answer from the right context.
-    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
-
-    await rm(path.join(home, "plugin-sessions"), { force: true });
-  });
-
-  it("pins what it inherited, so the bridge and the commands cannot drift", async () => {
+  it("keeps an unconnected bridge clean while another window switches", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
 
     const session = openSession("win-b");
     try {
       await session.handshake();
-      assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
+      assert.match(text(await session.getContext()), /No NeatContext Context is connected/);
 
-      // Another window moves on; this one is already pinned and must not.
+      // Another window moves on; this one must remain blank.
       await cli({ session: "win-a" }, "use", "payment team");
-      assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
+      assert.match(text(await session.getContext()), /No NeatContext Context is connected/);
     } finally {
       await session.close();
     }
@@ -1008,13 +999,25 @@ describe("a context per session", () => {
     assert.match(await cli({ session: "win-b" }, "status"), /payment team \(standard\)/);
   });
 
-  it("starts a new session on the context last connected", async () => {
+  it("starts a new session without the context last connected", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
 
-    // A window with no selection of its own inherits the default, which is what
-    // makes restarting Claude Code pick up where you left off.
-    assert.match(await cli({ session: "win-new" }, "status"), /Payments Runbooks \(lite\)/);
+    assert.match(await cli({ session: "win-new" }, "status"), /No context is connected/);
+  });
+
+  it("does not inherit a legacy session-less selection", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    const records = await readdir(path.join(home, "lite"));
+    const legacy = JSON.parse(
+      await readFile(path.join(home, "lite", records[0], "context.json"), "utf8")
+    );
+    await writeFile(
+      path.join(home, "plugin-selection.json"),
+      JSON.stringify({ kind: "lite", liteContextId: legacy.id, contextName: legacy.name })
+    );
+
+    assert.match(await cli({ session: "win-new" }, "status"), /No context is connected/);
   });
 
   it("grounds the bridge in the session's own context, not the default", async () => {
@@ -1052,7 +1055,7 @@ describe("a context per session", () => {
 // `never writes the connection a stale bridge would read` covers this now.
 
 describe("a context that is deleted", () => {
-  it("stops a deleted context from being inherited by new sessions", async () => {
+  it("leaves new sessions clean and reports stale selections to existing sessions", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
     await cli({ session: "win-b" }, "use", "Payments");
@@ -1060,8 +1063,7 @@ describe("a context that is deleted", () => {
     await cli({ session: "win-a" }, "delete", "Payments", "--yes");
 
     assert.match(await cli({ session: "win-a" }, "status"), /No context is connected/);
-    // The default went too, so a window opened now does not inherit a context
-    // that no longer exists.
+    // A new window is blank regardless of what earlier sessions selected.
     assert.match(await cli({ session: "win-fresh" }, "status"), /No context is connected/);
     // A window already holding it is left to find out for itself: clearing its
     // file from here would unground windows sitting on unrelated contexts, and
