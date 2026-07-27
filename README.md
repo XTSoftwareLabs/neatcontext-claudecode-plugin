@@ -1,6 +1,8 @@
 # NeatContext for Claude Code
 
-Extract domain knowledge and save useful work from a Claude Code conversation as a reusable structural context which can be reused in a later session or shared with others.
+Extract domain knowledge and save useful work from a Claude Code conversation
+as structured, reusable context that you can use in later sessions or share
+with others.
 
 ## Why NeatContext?
 
@@ -106,7 +108,7 @@ Save the useful work in the current conversation as a new lite context. The
 name is optional; Claude chooses a specific name if you omit it.
 
 Use this after a conversation has produced decisions, plans, troubleshooting
-results, implementation notes, or other work worth persisting and reused later.
+results, implementation notes, or other work worth preserving and reusing later.
 
 ### `/neatcontext:use [name or number]`
 
@@ -176,7 +178,9 @@ A lite context contains:
   session summaries, and other knowledge Claude can use.
 - **No extensions.**
 
-Use `/neatcontext:save` to generate one from the current conversation, `/neatcontext:create` to use an existing knowledge folder, or `/neatcontext:import` to add one shared by a teammate.
+Use `/neatcontext:save` to generate one from the current conversation,
+`/neatcontext:create` to use an existing knowledge folder, or
+`/neatcontext:import` to add one shared by a teammate.
 
 ### Standard context
 
