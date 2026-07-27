@@ -4,6 +4,7 @@ import test from "node:test";
 
 const ROOT = new URL("../", import.meta.url);
 const CANONICAL_REPOSITORY = "https://github.com/XTSoftwareLabs/neatcontext-plugins";
+const CLAUDE_PLUGIN_ROOT = "plugins/claude-code/neatcontext";
 const USER_ONLY_COMMANDS = ["create", "delete", "import", "mode", "save", "use"];
 
 function read(relativePath) {
@@ -31,10 +32,10 @@ function parseFrontmatter(markdown, file) {
 
 test("marketplace metadata is complete, canonical, and version-aligned", async () => {
   const [pluginText, marketplaceText, packageText, bridgeText, readme] = await Promise.all([
-    read(".claude-plugin/plugin.json"),
+    read(`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`),
     read(".claude-plugin/marketplace.json"),
     read("package.json"),
-    read("src/claude/mcp-bridge.mjs"),
+    read(`${CLAUDE_PLUGIN_ROOT}/src/claude/mcp-bridge.mjs`),
     read("README.md")
   ]);
   const plugin = JSON.parse(pluginText);
@@ -50,8 +51,9 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   assert.equal(entry.repository, CANONICAL_REPOSITORY);
   assert.equal(entry.homepage, CANONICAL_REPOSITORY);
   assert.deepEqual(entry.source, {
-    source: "url",
+    source: "git-subdir",
     url: `${CANONICAL_REPOSITORY}.git`,
+    path: CLAUDE_PLUGIN_ROOT,
     ref: `v${plugin.version}`
   });
   assert.equal(plugin.license, "MIT");
@@ -74,7 +76,7 @@ test("commands pre-approve only the bundled CLI and never interpolate arguments 
   const commandNames = ["create", "delete", "import", "list", "mode", "save", "status", "use"];
 
   for (const name of commandNames) {
-    const file = `commands/${name}.md`;
+    const file = `${CLAUDE_PLUGIN_ROOT}/commands/${name}.md`;
     const markdown = await read(file);
     const frontmatter = parseFrontmatter(markdown, file);
 
@@ -99,7 +101,7 @@ test("commands pre-approve only the bundled CLI and never interpolate arguments 
 
 test("commands with side effects can only be invoked explicitly by the user", async () => {
   for (const name of USER_ONLY_COMMANDS) {
-    const file = `commands/${name}.md`;
+    const file = `${CLAUDE_PLUGIN_ROOT}/commands/${name}.md`;
     const frontmatter = parseFrontmatter(await read(file), file);
     assert.equal(
       frontmatter["disable-model-invocation"],

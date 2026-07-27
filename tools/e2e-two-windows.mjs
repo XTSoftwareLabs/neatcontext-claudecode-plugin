@@ -9,8 +9,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import readline from "node:readline";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PLUGIN = "C:/Workspace/neatcontextclaudecodeplugin";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PLUGIN = path.join(REPO_ROOT, "plugins", "claude-code", "neatcontext");
 const HOME = path.join(os.homedir(), ".neatcontext");
 const DISCOVERY = path.join(HOME, "companion.json");
 const SELECTION = path.join(HOME, "plugin-selection.json");

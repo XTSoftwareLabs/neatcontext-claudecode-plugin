@@ -17,7 +17,15 @@ import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { ROUTING_TOOL_NAMES, closeSession, startFakeCompanion } from "./fake-companion.mjs";
 
-const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
+const claude = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "plugins",
+  "claude-code",
+  "neatcontext",
+  "src",
+  "claude"
+);
 
 let companion;
 let home;
@@ -28,8 +36,10 @@ let routingFile;
 // pointing this at the fixture before the first call is enough to isolate the
 // in-process tests — no import order to get right.
 process.env.NEATCONTEXT_COMPANION_FILE = "";
-await import("../src/claude/session.mjs");
-const { configureSessionId } = await import("../src/core/session.mjs");
+await import("../plugins/claude-code/neatcontext/src/claude/session.mjs");
+const { configureSessionId } = await import(
+  "../plugins/claude-code/neatcontext/src/core/session.mjs"
+);
 
 const {
   MODES,
@@ -47,9 +57,9 @@ const {
   sessionId,
   setMode,
   switchPolicy
-} = await import("../src/core/routing.mjs");
+} = await import("../plugins/claude-code/neatcontext/src/core/routing.mjs");
 const { applySelection, listAllContexts, resolveContext } = await import(
-  "../src/core/selection.mjs"
+  "../plugins/claude-code/neatcontext/src/core/selection.mjs"
 );
 
 before(async () => {

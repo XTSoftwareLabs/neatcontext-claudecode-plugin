@@ -58,6 +58,7 @@ installation with:
 
 ```bash
 claude plugin validate . --strict
+claude plugin validate plugins/claude-code/neatcontext --strict
 ```
 
 ## Quick start: reuse a complex investigation
