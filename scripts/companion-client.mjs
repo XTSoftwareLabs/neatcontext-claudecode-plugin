@@ -53,26 +53,21 @@ export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
 
-// Claude Code sets this per session, and everything the plugin runs inherits
-// it: the MCP bridge it spawns, and the slash commands that shell out. Absent —
-// an older host, or a direct CLI run — every session shares one selection, the
-// way they always did.
+// Claude Code sets this for the processes it runs a slash command in, but NOT
+// for an MCP server: `plugin.json` declares no env for the bridge, and the host
+// passes none. Measured, not assumed — with both connection records cleared, a
+// get_context through the live bridge connected the app's session-less record
+// and left the record for this session id untouched.
+//
+// So the bridge cannot know which window it serves, and the bridge is the half
+// that grounds answers and serves tools. Anything scoped to a session here can
+// only ever be honoured by the slash commands, which is worse than not scoping
+// it: the commands then report a per-window context while every answer comes
+// from a shared one. Keep this for telling *some* window apart from another
+// where only the CLI is involved; never let a grounding decision depend on it.
 export function sessionId() {
   const id = process.env.CLAUDE_CODE_SESSION_ID;
   return typeof id === "string" && id.trim().length > 0 ? id.trim() : null;
-}
-
-// One file per Claude Code window. A window is where a context belongs: you
-// open one to work on a thing, and the context is what that thing is. Sharing a
-// single selection meant connecting in one window silently re-grounded every
-// other, which is invisible from inside them.
-//
-// The global file above stays the *default* — what a window with no selection
-// of its own starts on — so restarting Claude Code still picks up the context
-// you were last using, and a pre-session plugin process still finds what it
-// expects to find.
-export function sessionSelectionFilePath(id) {
-  return path.join(path.dirname(discoveryFilePath()), "plugin-sessions", `${id}.json`);
 }
 
 export async function readDiscovery() {
@@ -88,21 +83,12 @@ export async function readDiscovery() {
   }
 }
 
-// This session's selection: its own if it has one, otherwise the default.
+// The selected context. One per machine: the bridge cannot tell windows apart
+// (see `sessionId`), so a per-window selection would be read by the slash
+// commands and ignored by the half that actually grounds answers.
 export async function readSelection() {
-  const id = sessionId();
-  if (id) {
-    const own = await readSelectionFrom(sessionSelectionFilePath(id));
-    if (own) {
-      return own;
-    }
-  }
-  return readSelectionFrom(selectionFilePath());
-}
-
-async function readSelectionFrom(file) {
   try {
-    const parsed = JSON.parse(await readFile(file, "utf8"));
+    const parsed = JSON.parse(await readFile(selectionFilePath(), "utf8"));
     // `contextId` is also accepted for a lite kind so a selection written by an
     // earlier build of this feature still resolves.
     const liteId =
@@ -135,53 +121,32 @@ async function readSelectionFrom(file) {
   }
 }
 
-async function writeJson(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-}
-
-// Written to both places: this session's file is what it will read back, and
-// the default is updated so the *next* window starts where this one left off.
 export async function writeSelection(selection) {
-  const id = sessionId();
-  if (id) {
-    await writeJson(sessionSelectionFilePath(id), selection);
-  }
-  await writeJson(selectionFilePath(), selection);
+  const file = selectionFilePath();
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(selection, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
 }
 
-// Only ever called for a context that no longer exists, which is gone for every
-// window: clearing this session's file alone would leave the default behind for
-// the next one to inherit.
 export async function clearSelection() {
-  const id = sessionId();
-  if (id) {
-    await rm(sessionSelectionFilePath(id), { force: true }).catch(() => undefined);
-  }
   await rm(selectionFilePath(), { force: true }).catch(() => undefined);
 }
 
-// `shared` omits the session header, addressing the one connection an app keeps
-// for clients that do not identify a session. See `applySelection`.
-export async function request(
-  discovery,
-  method,
-  route,
-  { body, timeoutMs = 4000, shared = false } = {}
-) {
+// No `x-neatcontext-session` header. NeatContext keys connections by it, and
+// sending one from the slash commands while the bridge cannot send any would
+// point the two halves of the plugin at two different connections — the command
+// would report a context that no answer in that window is using.
+export async function request(discovery, method, route, { body, timeoutMs = 4000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const id = shared ? null : sessionId();
     const response = await fetch(`http://127.0.0.1:${discovery.port}${route}`, {
       method,
       signal: controller.signal,
       headers: {
         authorization: `Bearer ${discovery.token}`,
-        // Tells NeatContext whose connection this is about. A build of the app
-        // that predates it ignores the header and serves the one shared
-        // connection, which is what this plugin used to rely on anyway.
-        ...(id ? { "x-neatcontext-session": id } : {}),
         ...(body !== undefined ? { "content-type": "application/json" } : {})
       },
       body: body !== undefined ? JSON.stringify(body) : undefined
@@ -205,8 +170,6 @@ export function clientFor(discovery) {
     getConnection: () => request(discovery, "GET", "/v1/connection"),
     selectContext: (contextId) =>
       request(discovery, "PUT", "/v1/connection", { body: { contextId } }),
-    selectContextShared: (contextId) =>
-      request(discovery, "PUT", "/v1/connection", { body: { contextId }, shared: true }),
     disconnect: () => request(discovery, "DELETE", "/v1/connection"),
     getDocument: (opts) => request(discovery, "GET", "/v1/context", opts)
   };

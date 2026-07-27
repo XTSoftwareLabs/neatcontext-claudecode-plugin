@@ -11,5 +11,5 @@ Set or show how this session routes itself between contexts.
 Relay the output above as it is. Do not explain the modes again if the command
 already listed them, and do not switch context as part of running this command.
 
-The mode set here applies to this session only. `/neatcontext:mode <mode>
---global` changes the default for new sessions instead.
+The mode applies to every open Claude Code window, because the connected context
+does too.

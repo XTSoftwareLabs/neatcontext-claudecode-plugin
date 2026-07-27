@@ -32,7 +32,6 @@ import {
   putCard,
   readRouting,
   resolveMode,
-  sessionId,
   setMode
 } from "./routing.mjs";
 import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
@@ -179,7 +178,7 @@ async function loadState() {
 async function commandStatus(state) {
   const { connected } = state;
   const routing = await readRouting();
-  const mode = resolveMode(routing, sessionId());
+  const mode = resolveMode(routing);
   // Reported alongside the connection because the two together are the whole
   // answer to "what is this session going to do": what it is grounded in, and
   // whether it may re-ground itself.
@@ -350,13 +349,10 @@ async function commandAlias(state, query, flags) {
   print(`Noted — "${recorded}" now routes to "${resolution.context.name}".`);
 }
 
-async function commandMode(query, flags) {
+async function commandMode(query) {
   const routing = await readRouting();
-  const id = sessionId();
   if (query.length === 0) {
-    const active = resolveMode(routing, id);
-    const scope = MODES.includes(routing.sessions[id]?.mode) ? "this session" : "the default";
-    print(`Context routing is ${active} (${scope}).`);
+    print(`Context routing is ${resolveMode(routing)}.`);
     print("");
     print("  auto    switch context on a clear match, and say so; ask when it is a close call");
     print("  ask     always ask before switching (default)");
@@ -371,17 +367,14 @@ async function commandMode(query, flags) {
     print(`"${query}" is not a mode. Use one of: ${MODES.join(", ")}.`);
     return;
   }
-  const isGlobal = flags.global === true || flags.global === "true";
-  const result = await setMode(wanted, { global: isGlobal, id });
-  print(
-    result.scope === "global"
-      ? `Context routing is now ${wanted} everywhere (the default for new sessions).`
-      : `Context routing is now ${wanted} for this session.`
-  );
+  await setMode(wanted);
+  print(`Context routing is now ${wanted}.`);
   if (wanted === "auto") {
+    // One connected context per machine, so a switch is felt by every open
+    // window. Auto mode is what makes that happen often rather than rarely.
     print(
-      "In auto mode this session switches context on its own, and tells you when it does. " +
-        "Other Claude Code windows keep theirs."
+      "The session will switch context on its own and tell you when it does. Every open " +
+        "Claude Code window shares one connected context, so a switch here changes theirs too."
     );
   }
 }
@@ -503,7 +496,7 @@ async function run() {
   // Reads no context list and touches no connection: the one command that still
   // answers with the desktop app closed and nothing created yet.
   if (command === "mode") {
-    await commandMode(query, flags);
+    await commandMode(query);
     return;
   }
 

@@ -45,7 +45,6 @@ import {
   readRouting,
   renderMenu,
   resolveMode,
-  sessionId,
   switchPolicy
 } from "./routing.mjs";
 import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
@@ -324,7 +323,7 @@ async function routingMenu() {
   const selection = await readSelection().catch(() => null);
   return renderMenu(menuEntries(contexts, state), {
     connectedId: selection?.contextId ?? null,
-    mode: resolveMode(state, sessionId())
+    mode: resolveMode(state)
   });
 }
 
@@ -383,7 +382,6 @@ async function routingToolCall(message) {
   const selection = await readSelection().catch(() => null);
   const state = await readRouting();
   const policy = switchPolicy(state, {
-    id: sessionId(),
     targetId: target.id,
     connectedId: selection?.contextId ?? null,
     requested: args.requested === true
@@ -409,7 +407,6 @@ async function routingToolCall(message) {
   // because a wrong route is the moment they say what it should have been.
   const alias = typeof args.alias === "string" ? await addAlias(target.id, args.alias) : null;
   await noteDecision({
-    sessionId: sessionId(),
     from: selection?.contextName ?? null,
     to: target.name,
     mode: policy.mode,
@@ -436,7 +433,7 @@ function refusal(policy, target) {
       `context, tell the user to run \`/neatcontext:use ${target.name}\`.`
     );
   }
-  if (policy.reason === "declined-this-session") {
+  if (policy.reason === "recently-declined") {
     return (
       `The user already declined switching to "${target.name}" in this session. Do not ask ` +
       "again — answer with the context that is connected, or say what it cannot cover."
@@ -501,7 +498,7 @@ async function forward(message) {
 async function currentVersion() {
   // The mode is part of it: leaving manual has to make the routing tools appear
   // without waiting for a restart, and entering it has to take them away.
-  const mode = resolveMode(await readRouting(), sessionId());
+  const mode = resolveMode(await readRouting());
   const lite = await activeLite();
   if (lite) {
     return `${mode}/${lite.missing ? "lite:missing" : `lite:${lite.record.id}`}`;
@@ -624,7 +621,7 @@ async function withRoutingTools(response) {
     return response;
   }
   const state = await readRouting();
-  if (resolveMode(state, sessionId()) === "manual") {
+  if (resolveMode(state) === "manual") {
     return response;
   }
   return {

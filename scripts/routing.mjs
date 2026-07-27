@@ -36,7 +36,6 @@ const SCHEMA = 1;
 const MAX_USE_WHEN = 240;
 const MAX_ALIASES = 12;
 const MAX_DECISIONS = 100;
-const MAX_SESSIONS = 20;
 
 export function routingFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-routing.json");
@@ -80,21 +79,18 @@ export async function readRouting() {
     schema: SCHEMA,
     mode: MODES.includes(parsed?.mode) ? parsed.mode : DEFAULT_MODE,
     cards,
-    sessions: typeof parsed?.sessions === "object" && parsed.sessions !== null ? parsed.sessions : {},
+    declined:
+      typeof parsed?.declined === "object" && parsed.declined !== null ? parsed.declined : {},
     decisions: Array.isArray(parsed?.decisions) ? parsed.decisions : []
   };
 }
 
 async function writeRouting(state) {
-  // Sessions accumulate forever otherwise — one per Claude Code window, ever.
-  const sessions = Object.entries(state.sessions)
-    .sort((a, b) => (b[1]?.updatedAt ?? "").localeCompare(a[1]?.updatedAt ?? ""))
-    .slice(0, MAX_SESSIONS);
   const file = routingFilePath();
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(
     file,
-    `${JSON.stringify({ ...state, sessions: Object.fromEntries(sessions), decisions: state.decisions.slice(-MAX_DECISIONS) }, null, 2)}\n`,
+    `${JSON.stringify({ ...state, decisions: state.decisions.slice(-MAX_DECISIONS) }, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 }
   );
 }
@@ -153,30 +149,22 @@ export function isCardStale(card, source) {
 
 // --- mode --------------------------------------------------------------------
 
-// Global default, overridden per session. A mode is a property of what you are
-// doing right now, not of the machine: one window deep in an incident wants
-// auto, another window writing code wants to be left alone.
-export function resolveMode(state, id) {
-  const session = id ? state.sessions[id] : null;
-  return MODES.includes(session?.mode) ? session.mode : state.mode;
+// One mode per machine. A per-window mode reads better on paper — one window
+// deep in an incident wants auto, another writing code wants quiet — but the
+// bridge decides whether to offer the switching tools and it cannot tell the
+// windows apart, so it would always read the global value. `/neatcontext:mode
+// auto` would then report a change this window never got.
+export function resolveMode(state) {
+  return MODES.includes(state.mode) ? state.mode : DEFAULT_MODE;
 }
 
-export function setMode(mode, { global: isGlobal = false, id = sessionId() } = {}) {
+export function setMode(mode) {
   if (!MODES.includes(mode)) {
     return Promise.resolve(null);
   }
   return update((state) => {
-    if (isGlobal || !id) {
-      state.mode = mode;
-      // A global change the user asked for should not be masked by an override
-      // this session set earlier.
-      if (id && state.sessions[id]) {
-        delete state.sessions[id].mode;
-      }
-      return { mode, scope: "global" };
-    }
-    state.sessions[id] = { ...state.sessions[id], mode, updatedAt: new Date().toISOString() };
-    return { mode, scope: "session" };
+    state.mode = mode;
+    return { mode };
   });
 }
 
@@ -186,8 +174,8 @@ export function setMode(mode, { global: isGlobal = false, id = sessionId() } = {
 // they can allow or deny the tool, but the answer depends on the mode, on what
 // the user just declined, and on how much switching this session has already
 // done. Allow the tool once, and let this decide.
-export function switchPolicy(state, { id, targetId, connectedId, requested = false }) {
-  const mode = resolveMode(state, id);
+export function switchPolicy(state, { targetId, connectedId, requested = false, now = Date.now() }) {
+  const mode = resolveMode(state);
   if (targetId === connectedId) {
     return { allowed: false, mode, reason: "already-connected" };
   }
@@ -202,27 +190,31 @@ export function switchPolicy(state, { id, targetId, connectedId, requested = fal
   if (mode === "ask") {
     return { allowed: false, mode, reason: "ask-first" };
   }
-  const session = (id && state.sessions[id]) ?? {};
-  if ((session.declined ?? []).includes(targetId)) {
-    return { allowed: false, mode, reason: "declined-this-session" };
+  if (isDeclined(state, targetId, now)) {
+    return { allowed: false, mode, reason: "recently-declined" };
   }
   return { allowed: true, mode, reason: "auto" };
 }
 
-// Remembering a refusal is what stops auto mode from proposing the same wrong
-// context on every message that shares a word with it.
-export function noteDeclined(targetId, { id = sessionId() } = {}) {
-  if (!id) {
-    return Promise.resolve(null);
-  }
+// A refusal was scoped to the session, which meant the bridge — the only thing
+// that ever records one — could not scope it at all, so nothing was recorded and
+// auto mode re-proposed a rejected context on every message that shared a word
+// with it. Recording it against the machine is what makes it work.
+//
+// Time replaces the session as the boundary. "Do not raise this again" has to
+// end somewhere, and without a session to end with, a window is the honest
+// approximation: long enough to stop the pestering, short enough that a
+// declined context is not suppressed for good.
+const DECLINE_TTL_MS = 2 * 60 * 60 * 1000;
+
+export function isDeclined(state, targetId, now = Date.now()) {
+  const at = state.declined?.[targetId];
+  return typeof at === "number" && now - at < DECLINE_TTL_MS;
+}
+
+export function noteDeclined(targetId, { now = Date.now() } = {}) {
   return update((state) => {
-    const session = state.sessions[id] ?? {};
-    const declined = session.declined ?? [];
-    state.sessions[id] = {
-      ...session,
-      declined: declined.includes(targetId) ? declined : [...declined, targetId],
-      updatedAt: new Date().toISOString()
-    };
+    state.declined = { ...state.declined, [targetId]: now };
     return targetId;
   });
 }
@@ -233,15 +225,6 @@ export function noteDeclined(targetId, { id = sessionId() } = {}) {
 export function noteDecision(entry) {
   return update((state) => {
     state.decisions.push({ at: new Date().toISOString(), ...entry });
-    const id = entry.sessionId;
-    if (id) {
-      const session = state.sessions[id] ?? {};
-      state.sessions[id] = {
-        ...session,
-        switches: (session.switches ?? 0) + 1,
-        updatedAt: new Date().toISOString()
-      };
-    }
     return entry;
   });
 }

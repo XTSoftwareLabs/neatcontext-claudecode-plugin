@@ -47,7 +47,7 @@ way it picks a skill. No prompt classifier runs on your machine, and nothing is
 sent anywhere: the plugin supplies the menu, and the model already reading your
 message does the choosing.
 
-Three modes, set per session with `/neatcontext:mode`:
+Three modes, set with `/neatcontext:mode`:
 
 - **`ask`** (default) — when your request plainly belongs to another context,
   Claude says so and asks. It never switches on its own.
@@ -57,22 +57,27 @@ Three modes, set per session with `/neatcontext:mode`:
   `/neatcontext:use` is the only way to change contexts.
 
 Detection is automatic in both `ask` and `auto` — the mode decides what happens
-*after* a switch looks warranted, not whether to look. `/neatcontext:mode auto
---global` changes the default for new sessions.
+*after* a switch looks warranted, not whether to look.
 
 Claude will not route on follow-ups or on anything continuing the current topic,
-and if you decline a switch it drops that context for the rest of the session.
+and if you decline a switch it stops proposing that one for a couple of hours.
 When it does get one wrong, correcting it teaches it: say what you actually
 meant and the words you used are remembered for next time.
 
-Each Claude Code window holds its **own** context, so switching in one leaves the
-others alone. A new window starts on whichever context was connected last, so
-restarting still picks up where you left off.
-
-> Standard contexts need a NeatContext desktop build that keys connections by
-> session. Against an older build the plugin still works, but every window
-> shares one connection the way it used to — switching in one window re-grounds
-> the others. Lite contexts are unaffected; they never involve the app.
+> **One connected context per machine, and one mode.** Every open Claude Code
+> window shares both, so switching in one changes the others — and `auto` makes
+> that happen more often than picking by hand did.
+>
+> This is a limit of the host, not a choice. Claude Code does not tell a plugin's
+> MCP server which session it is serving, and that server is what grounds every
+> answer — so no amount of local bookkeeping can give each window its own
+> context. Scoping the *files* alone would be worse than not scoping them:
+> `/neatcontext:status` would report a per-window context that no answer in that
+> window was actually using.
+>
+> If you want one window kept out of it, disable the plugin there. When Claude
+> Code gives MCP servers a session identity, this becomes a small change — the
+> NeatContext desktop side already supports per-session connections.
 
 ### Where the descriptions come from
 
@@ -148,15 +153,11 @@ surface. The bridge only speaks:
   with `NEATCONTEXT_COMPANION_FILE`) and a token-gated `POST /v1/mcp` plus a few
   read endpoints (`/v1/health`, `/v1/contexts`, `/v1/connection`).
 
-The context you pick is recorded next to the discovery file: in
-`~/.neatcontext/plugin-sessions/<session>.json` for the window you picked it in,
-and in `~/.neatcontext/plugin-selection.json` as the default a new window starts
-on. Each holds a kind, a context id, and a name, nothing else. For a standard
-context this is what lets the plugin reconnect after NeatContext is restarted;
-for a lite context it *is* the connection, since no app is holding one.
-
-Requests to NeatContext carry an `x-neatcontext-session` header so the app can
-keep each window's connection separate.
+The context you pick is recorded next to the discovery file, in
+`~/.neatcontext/plugin-selection.json` — a kind, a context id, and a name,
+nothing else. For a standard context it is what lets the plugin reconnect after
+NeatContext is restarted; for a lite context it *is* the connection, since no app
+is holding one.
 
 Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 

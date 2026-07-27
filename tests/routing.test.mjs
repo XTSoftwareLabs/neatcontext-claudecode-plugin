@@ -34,6 +34,7 @@ const {
   addAlias,
   hashSource,
   isCardStale,
+  isDeclined,
   menuEntries,
   noteDecision,
   noteDeclined,
@@ -357,32 +358,26 @@ describe("aliases", () => {
 describe("the mode", () => {
   it("defaults to ask, and says what the three modes do", async () => {
     const output = await cli("mode");
-    assert.match(output, /Context routing is ask \(the default\)/);
+    assert.match(output, /Context routing is ask\./);
     assert.match(output, /auto\s+switch context on a clear match/);
     assert.match(output, /manual\s+never route/);
   });
 
-  it("is set for one session without changing the default", async () => {
-    assert.match(await cli({ session: "s1" }, "mode", "auto"), /now auto for this session/);
-
-    assert.match(await cli({ session: "s1" }, "mode"), /is auto \(this session\)/);
-    assert.match(await cli({ session: "s2" }, "mode"), /is ask \(the default\)/);
-  });
-
-  it("says what auto will do, and that it stays in this window", async () => {
-    const output = await cli({ session: "s1" }, "mode", "auto");
-    assert.match(output, /switches context on its own, and tells you when it does/);
-    assert.match(output, /Other Claude Code windows keep theirs/);
-  });
-
-  it("changes the default with --global, clearing a session override", async () => {
+  // A per-window mode reads better on paper, but the bridge decides whether to
+  // offer the switching tools and cannot tell windows apart — so it would always
+  // read the global value, and a per-window setting would report a change the
+  // window never got.
+  it("is one setting for every window", async () => {
     await cli({ session: "s1" }, "mode", "auto");
-    assert.match(
-      await cli({ session: "s1" }, "mode", "manual", "--global"),
-      /now manual everywhere/
-    );
-    // The override would otherwise mask the change the user just asked for.
-    assert.match(await cli({ session: "s1" }, "mode"), /is manual \(the default\)/);
+
+    assert.match(await cli({ session: "s1" }, "mode"), /Context routing is auto\./);
+    assert.match(await cli({ session: "s2" }, "mode"), /Context routing is auto\./);
+  });
+
+  it("says what auto will do, and that every window is in it", async () => {
+    const output = await cli({ session: "s1" }, "mode", "auto");
+    assert.match(output, /switch context on its own and tell you when it does/);
+    assert.match(output, /Every open Claude Code window shares one connected context/);
   });
 
   it("refuses a mode that does not exist", async () => {
@@ -390,15 +385,17 @@ describe("the mode", () => {
     assert.equal(await setMode("aggressive"), null);
   });
 
-  it("falls back to the global mode when the host sets no session id", async () => {
-    await setMode("auto", { global: true });
-    const state = await readRouting();
-    assert.equal(resolveMode(state, null), "auto");
+  it("falls back to the default when the stored mode is unusable", async () => {
+    await setMode("auto");
+    assert.equal(resolveMode(await readRouting()), "auto");
+    assert.equal(resolveMode({ mode: "nonsense" }), "ask");
     // Every mode is a real one; nothing here invents a fourth.
     assert.deepEqual(MODES, ["auto", "ask", "manual"]);
   });
 
-  it("reads the session id Claude Code sets", async () => {
+  // Kept because the slash commands do get it — but nothing that decides how a
+  // question is answered may depend on it, because the bridge does not.
+  it("reads the session id Claude Code sets for a slash command", async () => {
     const previous = process.env.CLAUDE_CODE_SESSION_ID;
     process.env.CLAUDE_CODE_SESSION_ID = " sess-9 ";
     assert.equal(sessionId(), "sess-9");
@@ -420,52 +417,65 @@ describe("the mode", () => {
 // --- the policy --------------------------------------------------------------
 
 describe("when a switch is allowed", () => {
-  const state = (mode, session) => ({ mode, cards: {}, sessions: session ? { s1: session } : {} });
+  const state = (mode, declined) => ({ mode, cards: {}, declined: declined ?? {} });
 
   it("never switches to the context already connected", () => {
-    const policy = switchPolicy(state("auto"), { id: "s1", targetId: "a", connectedId: "a" });
+    const policy = switchPolicy(state("auto"), { targetId: "a", connectedId: "a" });
     assert.equal(policy.allowed, false);
     assert.equal(policy.reason, "already-connected");
   });
 
   it("switches on its own only in auto", () => {
-    const target = { id: "s1", targetId: "a", connectedId: "b" };
+    const target = { targetId: "a", connectedId: "b" };
     assert.equal(switchPolicy(state("auto"), target).allowed, true);
     assert.equal(switchPolicy(state("ask"), target).reason, "ask-first");
     assert.equal(switchPolicy(state("manual"), target).reason, "manual-mode");
   });
 
   it("honours an explicit request in ask mode, but never in manual", () => {
-    const target = { id: "s1", targetId: "a", connectedId: "b", requested: true };
+    const target = { targetId: "a", connectedId: "b", requested: true };
     assert.equal(switchPolicy(state("ask"), target).allowed, true);
     // Manual means the plugin never routes; the user still has /neatcontext:use.
     assert.equal(switchPolicy(state("manual"), target).allowed, true);
   });
 
-  it("does not re-propose a context the user already turned down", () => {
-    const declined = state("auto", { declined: ["a"] });
-    assert.equal(switchPolicy(declined, { id: "s1", targetId: "a", connectedId: "b" }).reason,
-      "declined-this-session");
+  it("does not re-propose a context the user just turned down", () => {
+    const now = Date.now();
+    const declined = state("auto", { a: now });
+    assert.equal(
+      switchPolicy(declined, { targetId: "a", connectedId: "b", now }).reason,
+      "recently-declined"
+    );
     // Another context is unaffected.
-    assert.equal(switchPolicy(declined, { id: "s1", targetId: "c", connectedId: "b" }).allowed, true);
+    assert.equal(switchPolicy(declined, { targetId: "c", connectedId: "b", now }).allowed, true);
   });
 
-  it("records a refusal only when there is a session to record it against", async () => {
-    assert.equal(await noteDeclined("ctx-dokploy", { id: null }), null);
-    await noteDeclined("ctx-dokploy", { id: "s1" });
-    await noteDeclined("ctx-dokploy", { id: "s1" });
-    assert.deepEqual((await readRouting()).sessions.s1.declined, ["ctx-dokploy"]);
+  // A refusal used to be scoped to the session — which meant the bridge, the
+  // only thing that ever records one, could not scope it and so recorded
+  // nothing. Time is the boundary that is actually available.
+  it("lets a refusal lapse instead of suppressing a context for good", () => {
+    const now = Date.now();
+    const declined = state("auto", { a: now - 3 * 60 * 60 * 1000 });
+    assert.equal(switchPolicy(declined, { targetId: "a", connectedId: "b", now }).allowed, true);
+    assert.equal(isDeclined({ declined: { a: now } }, "a", now), true);
+    assert.equal(isDeclined({ declined: {} }, "a", now), false);
+  });
+
+  it("records a refusal against the machine, since there is no session to use", async () => {
+    await noteDeclined("ctx-dokploy");
+    const { declined } = await readRouting();
+    assert.equal(typeof declined["ctx-dokploy"], "number");
+    assert.equal(isDeclined(await readRouting(), "ctx-dokploy"), true);
   });
 
   it("logs every switch, which is the only ground truth about routing quality", async () => {
-    await noteDecision({ sessionId: "s1", to: "payment team", mode: "auto" });
-    await noteDecision({ sessionId: null, to: "Dokploy", mode: "ask" });
+    await noteDecision({ to: "payment team", mode: "auto" });
+    await noteDecision({ to: "Dokploy", mode: "ask" });
 
-    const { decisions, sessions } = await readRouting();
+    const { decisions } = await readRouting();
     assert.equal(decisions.length, 2);
     assert.equal(decisions[0].to, "payment team");
     assert.ok(decisions[0].at, "a decision is worthless without when it happened");
-    assert.equal(sessions.s1.switches, 1);
   });
 });
 
@@ -840,35 +850,35 @@ describe("applying a selection", () => {
   });
 });
 
-// A window is where a context belongs: you open one to work on a thing, and the
-// context is what that thing is. Sharing one selection meant connecting in one
-// window silently re-grounded every other, invisibly from inside them.
-describe("a context per session", () => {
-  it("keeps two sessions on two different contexts", async () => {
+// Claude Code hands `CLAUDE_CODE_SESSION_ID` to a slash command but not to a
+// plugin's MCP server, and that server is what grounds every answer. So the
+// plugin has exactly one thing it can honestly do: keep one selection, and make
+// every part of itself agree about it.
+//
+// Scoping the *files* per window without the bridge is strictly worse than not
+// scoping them. It was shipped, and produced the report: two windows, each
+// reporting its own context from /neatcontext:status, both answering from
+// whichever context was connected last.
+describe("one context, and every part of the plugin agreeing about it", () => {
+  it("moves every window when any window switches", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
 
     await cli({ session: "win-a" }, "use", "Payments");
     await cli({ session: "win-b" }, "use", "payment team");
 
-    assert.match(await cli({ session: "win-a" }, "status"), /Payments Runbooks \(lite\)/);
+    // Not the nicer behaviour — the honest one. Both windows report what both
+    // windows will actually answer from.
+    assert.match(await cli({ session: "win-a" }, "status"), /payment team \(standard\)/);
     assert.match(await cli({ session: "win-b" }, "status"), /payment team \(standard\)/);
   });
 
-  it("starts a new session on the context last connected", async () => {
+  it("grounds the bridge in the context the commands report", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
 
-    // A window with no selection of its own inherits the default, which is what
-    // makes restarting Claude Code pick up where you left off.
-    assert.match(await cli({ session: "win-new" }, "status"), /Payments Runbooks \(lite\)/);
-  });
-
-  it("grounds the bridge in the session's own context, not the default", async () => {
-    await createContext("Payments Runbooks", { useWhen: "refunds" });
-    await cli({ session: "win-a" }, "use", "Payments");
-    await cli({ session: "win-b" }, "use", "payment team");
-
-    const session = openSession("win-a");
+    // The bridge gets no session id at all, so this is the whole point: what it
+    // serves has to be what /neatcontext:status just said.
+    const session = openSession("win-b");
     try {
       await session.handshake();
       assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
@@ -877,59 +887,28 @@ describe("a context per session", () => {
     }
   });
 
-  it("tells NeatContext which session a request is for", async () => {
+  it("never sends a session header, so both halves reach one connection", async () => {
     await cli({ session: "win-b" }, "use", "payment team");
-    // The desktop keys its connection by this header; without it every window
-    // shares one, which is the behaviour this replaces.
-    assert.ok(companion.state.sessionHeaders.includes("win-b"));
-  });
-});
 
-// A slash command is a fresh process running the current code. The MCP bridge in
-// the same window is long-lived and loaded its code at session start, so for the
-// rest of a session spanning a plugin update the two disagree about whether they
-// identify a session at all. The reported symptom: /neatcontext:list says Dokploy
-// is connected, and every question answers "No context is currently connected".
-describe("a bridge that predates the session header", () => {
-  it("still sees a context the slash command just connected", async () => {
-    await cli({ session: "win-a" }, "use", "payment team");
-
-    // Such a bridge sends no header, so the app's session-less connection is the
-    // only one it can see. Leaving it empty is what stranded the session.
+    // NeatContext keys connections by this header. Sending it from the commands
+    // while the bridge cannot send any is what split them apart.
+    assert.ok(companion.state.sessionHeaders.every((header) => header === undefined));
     assert.deepEqual(companion.state.bySession.get(undefined), {
       contextId: "ctx-payments",
       contextName: "payment team"
     });
   });
-
-  it("connects the session's own record too, so a current bridge is right", async () => {
-    await cli({ session: "win-a" }, "use", "payment team");
-
-    assert.deepEqual(companion.state.bySession.get("win-a"), {
-      contextId: "ctx-payments",
-      contextName: "payment team"
-    });
-    // Claiming the shared connection must not cost the per-session isolation.
-    assert.equal(companion.state.bySession.get("win-b"), undefined);
-  });
 });
 
 describe("a context that is deleted", () => {
-  it("stops a deleted context from being inherited by new sessions", async () => {
+  it("ungrounds every window, because the context is gone for all of them", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
-    await cli({ session: "win-b" }, "use", "Payments");
 
     await cli({ session: "win-a" }, "delete", "Payments", "--yes");
 
     assert.match(await cli({ session: "win-a" }, "status"), /No context is connected/);
-    // The default went too, so a window opened now does not inherit a context
-    // that no longer exists.
-    assert.match(await cli({ session: "win-fresh" }, "status"), /No context is connected/);
-    // A window already holding it is left to find out for itself: clearing its
-    // file from here would unground windows sitting on unrelated contexts, and
-    // this message is accurate and actionable.
-    assert.match(await cli({ session: "win-b" }, "status"), /no longer on disk/);
+    assert.match(await cli({ session: "win-b" }, "status"), /No context is connected/);
   });
 });
 

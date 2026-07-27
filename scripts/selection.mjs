@@ -80,20 +80,6 @@ export async function applySelection(target, client) {
     return { ok: false, reason: "refused" };
   }
   const name = selection.json?.contextName ?? target.name;
-
-  // Also claim the app's session-less connection. A slash command is a fresh
-  // process running the current code, but the MCP bridge it shares a window with
-  // is a long-lived one that loaded its code at session start — so right after a
-  // plugin update the two disagree about whether they identify a session. A
-  // bridge from before this feature sends no header and reads the app's shared
-  // connection, and would otherwise report "no context is connected" for a
-  // context the user just connected and that `/neatcontext:status` confirms.
-  //
-  // This costs the isolation nothing that was not already lost: such a bridge
-  // was global before this feature too. It buys agreement, which matters more
-  // than scoping a connection that process cannot see either way.
-  await client.selectContextShared(target.id).catch(() => undefined);
-
   // Remembered so the bridge can put the connection back if NeatContext is
   // restarted while this session is still open. The app is connected either
   // way, so failing to write this is not worth failing the switch over.
