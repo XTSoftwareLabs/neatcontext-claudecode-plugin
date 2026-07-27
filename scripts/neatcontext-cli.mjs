@@ -4,7 +4,6 @@
 //   status                     show the connected context
 //   list [--lite]              list contexts (standard from the app, plus lite)
 //   use [query]                connect by number, exact name, or unique substring
-//   off                        disconnect this session's context
 //   create --name --knowledge  create a lite context (--profile-from <file>)
 //   delete <query> [--yes]     delete a lite context
 //   mode [auto|ask|manual]     how the session may route itself between contexts
@@ -291,29 +290,6 @@ async function commandUse(state, query) {
   print(`Could not connect "${target.name}". Try again from the app.`);
 }
 
-// Disconnecting is per window, which is the only scope that makes sense for it:
-// you are saying "not here", not "not anywhere". The default is left alone, so
-// other sessions keep their grounding and the next new one still starts on the
-// context you were last using.
-async function commandOff(state) {
-  if (!state.connected) {
-    print("No context is connected to this session.");
-    return;
-  }
-  const name = state.connected.name;
-  if (state.connected.kind === "standard" && state.client) {
-    await state.client.disconnect().catch(() => undefined);
-  }
-  await clearSelection();
-  print(`Disconnected "${name}" from this session. Nothing is grounding answers here now.`);
-  print("Connect another with `/neatcontext:use`, or reopen this one the same way.");
-  if (!sessionId()) {
-    // Without a session id there is only one selection to clear, so this did
-    // reach every window. Saying so beats letting them find out.
-    print("This Claude Code build does not identify sessions, so it applied everywhere.");
-  }
-}
-
 // A context with no routing description can only be routed to by name, which is
 // what makes a standard context — whose profile the plugin cannot read until it
 // is connected — much worse at routing than a lite one. Connecting is the
@@ -511,9 +487,7 @@ async function commandDelete(state, query, flags) {
   print(`Deleted the "${deleted.name}" lite context.`);
   print(`Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`);
   if (state.connected?.id === deleted.id) {
-    // Everywhere, not just here: the context is gone from disk, so no window
-    // should be left holding a selection that can never resolve again.
-    await clearSelection({ everywhere: true });
+    await clearSelection();
     print("It was the connected context, so this session is no longer grounded in one.");
   }
 }
@@ -559,14 +533,9 @@ async function run() {
     await commandDescribe(state, query, flags);
     return;
   }
-  if (command === "off") {
-    await commandOff(state);
-    return;
-  }
-
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | off | create | delete | mode | alias | describe."
+      "Use: status | list | use | create | delete | mode | alias | describe."
   );
 }
 

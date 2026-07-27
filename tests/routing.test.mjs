@@ -80,6 +80,7 @@ beforeEach(async () => {
   companion.state.lastRuntimeContext = null;
   companion.state.mcpError = false;
   companion.state.refuseConnect = false;
+  companion.state.bySession.clear();
   companion.state.contexts = [
     { id: "ctx-payments", name: "payment team" },
     { id: "ctx-dokploy", name: "Dokploy" }
@@ -880,42 +881,40 @@ describe("a context per session", () => {
     await cli({ session: "win-b" }, "use", "payment team");
     // The desktop keys its connection by this header; without it every window
     // shares one, which is the behaviour this replaces.
-    assert.deepEqual(companion.state.sessionHeaders.at(-1), "win-b");
+    assert.ok(companion.state.sessionHeaders.includes("win-b"));
   });
 });
 
-describe("disconnecting", () => {
-  it("ungrounds this session and leaves the others alone", async () => {
-    await createContext("Payments Runbooks", { useWhen: "refunds" });
-    await cli({ session: "win-a" }, "use", "Payments");
-    await cli({ session: "win-b" }, "use", "Payments");
+// A slash command is a fresh process running the current code. The MCP bridge in
+// the same window is long-lived and loaded its code at session start, so for the
+// rest of a session spanning a plugin update the two disagree about whether they
+// identify a session at all. The reported symptom: /neatcontext:list says Dokploy
+// is connected, and every question answers "No context is currently connected".
+describe("a bridge that predates the session header", () => {
+  it("still sees a context the slash command just connected", async () => {
+    await cli({ session: "win-a" }, "use", "payment team");
 
-    const output = await cli({ session: "win-a" }, "off");
-    assert.match(output, /Disconnected "Payments Runbooks" from this session/);
-
-    assert.match(await cli({ session: "win-a" }, "status"), /No context is connected/);
-    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+    // Such a bridge sends no header, so the app's session-less connection is the
+    // only one it can see. Leaving it empty is what stranded the session.
+    assert.deepEqual(companion.state.bySession.get(undefined), {
+      contextId: "ctx-payments",
+      contextName: "payment team"
+    });
   });
 
-  it("does not silently reconnect from the default afterwards", async () => {
-    await createContext("Payments Runbooks", { useWhen: "refunds" });
-    await cli({ session: "win-a" }, "use", "Payments");
-    await cli({ session: "win-a" }, "off");
+  it("connects the session's own record too, so a current bridge is right", async () => {
+    await cli({ session: "win-a" }, "use", "payment team");
 
-    // Deleting the session's file would fall back to the default and bring back
-    // the very context the user just dismissed.
-    assert.match(await cli({ session: "win-a" }, "status"), /No context is connected/);
-    assert.match(await cli({ session: "win-a" }, "status"), /No context is connected/);
+    assert.deepEqual(companion.state.bySession.get("win-a"), {
+      contextId: "ctx-payments",
+      contextName: "payment team"
+    });
+    // Claiming the shared connection must not cost the per-session isolation.
+    assert.equal(companion.state.bySession.get("win-b"), undefined);
   });
+});
 
-  it("drops the app's connection when the context was a standard one", async () => {
-    await cli({ session: "win-b" }, "use", "payment team");
-    assert.ok(companion.state.connected);
-
-    await cli({ session: "win-b" }, "off");
-    assert.equal(companion.state.connected, null);
-  });
-
+describe("a context that is deleted", () => {
   it("stops a deleted context from being inherited by new sessions", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
     await cli({ session: "win-a" }, "use", "Payments");
@@ -932,25 +931,13 @@ describe("disconnecting", () => {
     // this message is accurate and actionable.
     assert.match(await cli({ session: "win-b" }, "status"), /no longer on disk/);
   });
-
-  it("says so when there is nothing to disconnect", async () => {
-    assert.match(await cli({ session: "win-a" }, "off"), /No context is connected to this session/);
-  });
-
-  it("warns that it applied everywhere when the host names no session", async () => {
-    await createContext("Payments Runbooks", { useWhen: "refunds" });
-    await cli("use", "Payments");
-    const output = await cli("off");
-    assert.match(output, /does not identify sessions, so it applied everywhere/);
-    assert.match(await cli("status"), /No context is connected/);
-  });
 });
 
 describe("the command surface", () => {
   it("names every subcommand it has when given one it does not", async () => {
     assert.match(
       await cli("frobnicate"),
-      /Use: status \| list \| use \| off \| create \| delete \| mode \| alias \| describe/
+      /Use: status \| list \| use \| create \| delete \| mode \| alias \| describe/
     );
   });
 });

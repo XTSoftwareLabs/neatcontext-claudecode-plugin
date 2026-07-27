@@ -139,9 +139,24 @@ A lite context is whatever its profile says it is. Do not assume a subject area 
 
 Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
 
-const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context is connected to this session yet, so there is nothing to ground answers in.
+// Written to survive being wrong. These instructions are fixed at the handshake
+// and MCP cannot revise them, but what they describe changes freely: NeatContext
+// may not have finished starting when the host spawned this process, and a
+// Context can be connected afterwards — from this session or another window.
+//
+// So this must never state "nothing is connected" as a settled fact. A session
+// told that carries it for its whole life and answers it back to the user
+// without ever calling get_context, which by then would have returned a
+// perfectly good Context. Describing the handshake and deferring the current
+// state to the tool is the only thing that stays true.
+const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context was connected at the moment this session started. That says nothing about now: NeatContext may still have been starting up, and a Context can be connected at any time, from this session or another window.
 
-When the user asks something that depends on their own domain, documents, tools, or team conventions, tell them to connect a Context with /neatcontext:use — or to create a local one with /neatcontext:create, which needs no other software. Then call get_context and answer from what it returns.`;
+These instructions are fixed at the handshake and cannot be updated, so they are not evidence about the current state — and you must not tell the user nothing is connected on the strength of this text.
+
+When the user asks anything that depends on their own domain, documents, tools, or team conventions, call the get_context tool and let its answer decide:
+
+- If it returns a Context, ground your answer in it and cite what you used.
+- Only if it reports that nothing is connected, say so, and tell them to connect one with /neatcontext:use — or to create a local one with /neatcontext:create, which needs no other software.`;
 
 // Methods whose answer depends on which context is connected.
 const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);

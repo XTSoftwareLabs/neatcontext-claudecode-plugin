@@ -70,7 +70,11 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
     refuseConnect: false,
     // Every `x-neatcontext-session` seen, in order. A real NeatContext keys its
     // connections by this; the plugin has to actually send it.
-    sessionHeaders: []
+    sessionHeaders: [],
+    // Connections keyed the way the app keys them, with `undefined` holding the
+    // one it serves to clients that identify no session. `connected` stays as
+    // the *requesting* session's view, which is what most tests assert on.
+    bySession: new Map()
   };
 
   const server = createServer((request, response) => {
@@ -107,6 +111,7 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
           const context = state.contexts.find((entry) => entry.id === body?.contextId);
           if (!context) return send(404, { error: "unknown_context" });
           state.connected = { contextId: context.id, contextName: context.name };
+          state.bySession.set(request.headers["x-neatcontext-session"], state.connected);
           state.lastRuntimeContext = context;
           state.version += 1;
           return send(200, { contextId: context.id, contextName: context.name });
