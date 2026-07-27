@@ -49,6 +49,11 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   assert.equal(packageJson.repository.url, `${CANONICAL_REPOSITORY}.git`);
   assert.equal(entry.repository, CANONICAL_REPOSITORY);
   assert.equal(entry.homepage, CANONICAL_REPOSITORY);
+  assert.deepEqual(entry.source, {
+    source: "url",
+    url: `${CANONICAL_REPOSITORY}.git`,
+    ref: `v${plugin.version}`
+  });
   assert.equal(plugin.license, "MIT");
   assert.equal(entry.license, "MIT");
   assert.equal(plugin.version, packageJson.version);
@@ -56,7 +61,10 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
     bridgeText,
     new RegExp(`SERVER_INFO = \\{ name: "neatcontext", version: "${plugin.version.replaceAll(".", "\\.")}" \\}`)
   );
-  assert.match(readme, /XTSoftwareLabs\/neatcontext-plugins/);
+  assert.match(
+    readme,
+    /\/plugin marketplace add https:\/\/github\.com\/XTSoftwareLabs\/neatcontext-plugins\.git/
+  );
   assert.doesNotMatch(readme, /XTSoftwareLabs\/neatcontext-claudecode-plugin/);
   assert.match(readme, /^## Security and data handling$/m);
 });
