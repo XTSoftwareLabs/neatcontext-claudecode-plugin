@@ -23,7 +23,7 @@ what one person learned.
 
 | | Best for | What you get |
 |---|---|---|
-| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> |
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> All these are auto generated. |
 | **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
 | **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
 
