@@ -844,6 +844,69 @@ describe("applying a selection", () => {
 // context is what that thing is. Sharing one selection meant connecting in one
 // window silently re-grounded every other, invisibly from inside them.
 describe("a context per session", () => {
+  // The reported failure, and the reason it was so easy to miss: it needs a
+  // window that has never picked a context of its own. That window had no file,
+  // so it re-read the shared default on *every* call — and the moment any other
+  // window connected something, the default changed underneath it and it
+  // silently followed. Both windows then answered from one context while
+  // reporting two.
+  it("does not follow another window that switches afterwards", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    await cli({ session: "win-a" }, "use", "Payments");
+
+    // win-b never runs `use`. It inherits the default — once.
+    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+
+    await cli({ session: "win-a" }, "use", "payment team");
+
+    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+    assert.match(await cli({ session: "win-a" }, "status"), /payment team \(standard\)/);
+  });
+
+  it("still grounds the session when the pin cannot be written", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    await cli({ session: "win-a" }, "use", "Payments");
+    // A file where the directory has to go: pinning cannot succeed.
+    await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
+    await writeFile(path.join(home, "plugin-sessions"), "not a directory");
+
+    // Grounding is the point; the pin is an optimisation on top of it, and a
+    // session that cannot pin must still answer from the right context.
+    assert.match(await cli({ session: "win-b" }, "status"), /Payments Runbooks \(lite\)/);
+
+    await rm(path.join(home, "plugin-sessions"), { force: true });
+  });
+
+  it("pins what it inherited, so the bridge and the commands cannot drift", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    await cli({ session: "win-a" }, "use", "Payments");
+
+    const session = openSession("win-b");
+    try {
+      await session.handshake();
+      assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
+
+      // Another window moves on; this one is already pinned and must not.
+      await cli({ session: "win-a" }, "use", "payment team");
+      assert.match(text(await session.getContext()), /connected context: Payments Runbooks/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  // Claiming the app's session-less connection made a bridge stranded on an old
+  // build usable during an upgrade — by re-grounding every other window, since
+  // that is the connection a stale bridge reads.
+  it("never writes the connection a stale bridge would read", async () => {
+    await cli({ session: "win-a" }, "use", "payment team");
+
+    assert.deepEqual(companion.state.bySession.get("win-a"), {
+      contextId: "ctx-payments",
+      contextName: "payment team"
+    });
+    assert.equal(companion.state.bySession.get(undefined), undefined);
+  });
+
   it("keeps two sessions on two different contexts", async () => {
     await createContext("Payments Runbooks", { useWhen: "refunds" });
 
@@ -890,29 +953,12 @@ describe("a context per session", () => {
 // rest of a session spanning a plugin update the two disagree about whether they
 // identify a session at all. The reported symptom: /neatcontext:list says Dokploy
 // is connected, and every question answers "No context is currently connected".
-describe("a bridge that predates the session header", () => {
-  it("still sees a context the slash command just connected", async () => {
-    await cli({ session: "win-a" }, "use", "payment team");
-
-    // Such a bridge sends no header, so the app's session-less connection is the
-    // only one it can see. Leaving it empty is what stranded the session.
-    assert.deepEqual(companion.state.bySession.get(undefined), {
-      contextId: "ctx-payments",
-      contextName: "payment team"
-    });
-  });
-
-  it("connects the session's own record too, so a current bridge is right", async () => {
-    await cli({ session: "win-a" }, "use", "payment team");
-
-    assert.deepEqual(companion.state.bySession.get("win-a"), {
-      contextId: "ctx-payments",
-      contextName: "payment team"
-    });
-    // Claiming the shared connection must not cost the per-session isolation.
-    assert.equal(companion.state.bySession.get("win-b"), undefined);
-  });
-});
+// A bridge that loaded its code before the session header existed reads the
+// app's session-less connection. Writing that connection so it stays usable
+// through an upgrade was the wrong trade: it is the one connection *every*
+// stale bridge shares, so claiming it re-grounds every other window. An upgrade
+// ends at the next restart; the isolation has to hold every day after it.
+// `never writes the connection a stale bridge would read` covers this now.
 
 describe("a context that is deleted", () => {
   it("stops a deleted context from being inherited by new sessions", async () => {

@@ -50,6 +50,7 @@ after(async () => {
 beforeEach(async () => {
   await rm(path.join(home, "lite"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-selection.json"), { force: true });
+  await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-routing.json"), { force: true });
 });
 
@@ -74,10 +75,13 @@ async function createContext(name, { folder = docs, profile = "# Payments\n\n## 
 }
 
 // A stand-in for Claude Code: one bridge process kept alive across turns.
+// `childEnv` matters here as much as it does for the CLI — inheriting the real
+// CLAUDE_CODE_SESSION_ID would let the bridge pin a selection under the id of
+// whatever session is *running the tests*, which then outlives beforeEach.
 function openSession() {
   const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
-    env: { ...process.env, NEATCONTEXT_COMPANION_FILE: discoveryFile }
+    env: childEnv()
   });
   const waiters = new Map();
   readline.createInterface({ input: child.stdout }).on("line", (line) => {

@@ -16,7 +16,7 @@
 //
 // Override the discovery file location with NEATCONTEXT_COMPANION_FILE.
 
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile as copyFileRaw, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -88,16 +88,38 @@ export async function readDiscovery() {
   }
 }
 
-// This session's selection: its own if it has one, otherwise the default.
+// This session's selection: its own if it has one, otherwise the default —
+// which it then *keeps*.
+//
+// Inheriting the default on every read instead of once is what made a switch in
+// one window move another. A window that has never run /neatcontext:use has no
+// file of its own, so it re-read the shared default each time; the moment any
+// other window connected something, that default changed underneath it and it
+// silently followed. Two windows, and only one of them ever chose anything.
+//
+// Snapshotting the default into this session's own file on first read fixes it
+// without giving up the thing the default is for: a new window still starts on
+// the context you were last using, so restarting Claude Code picks up where you
+// left off. It just stops tracking that value afterwards.
 export async function readSelection() {
   const id = sessionId();
-  if (id) {
-    const own = await readSelectionFrom(sessionSelectionFilePath(id));
-    if (own) {
-      return own;
-    }
+  if (!id) {
+    return readSelectionFrom(selectionFilePath());
   }
-  return readSelectionFrom(selectionFilePath());
+  const own = await readSelectionFrom(sessionSelectionFilePath(id));
+  if (own) {
+    return own;
+  }
+  const inherited = await readSelectionFrom(selectionFilePath());
+  if (inherited) {
+    // Copied verbatim rather than re-serialized from the parsed form, which
+    // would turn a lite selection's `liteContextId` into a plain `contextId` —
+    // the one field shape `selectionFilePath` explains must stay as written.
+    // Best-effort: grounding must not fail because a snapshot could not be
+    // written, and an unpinned session still reads the right context today.
+    await copyFile(selectionFilePath(), sessionSelectionFilePath(id));
+  }
+  return inherited;
 }
 
 async function readSelectionFrom(file) {
@@ -140,6 +162,15 @@ async function writeJson(file, value) {
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
+async function copyFile(from, to) {
+  try {
+    await mkdir(path.dirname(to), { recursive: true });
+    await copyFileRaw(from, to);
+  } catch {
+    // Nothing to pin, or nowhere to pin it: the caller already has the value.
+  }
+}
+
 // Written to both places: this session's file is what it will read back, and
 // the default is updated so the *next* window starts where this one left off.
 export async function writeSelection(selection) {
@@ -161,18 +192,11 @@ export async function clearSelection() {
   await rm(selectionFilePath(), { force: true }).catch(() => undefined);
 }
 
-// `shared` omits the session header, addressing the one connection an app keeps
-// for clients that do not identify a session. See `applySelection`.
-export async function request(
-  discovery,
-  method,
-  route,
-  { body, timeoutMs = 4000, shared = false } = {}
-) {
+export async function request(discovery, method, route, { body, timeoutMs = 4000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const id = shared ? null : sessionId();
+    const id = sessionId();
     const response = await fetch(`http://127.0.0.1:${discovery.port}${route}`, {
       method,
       signal: controller.signal,
@@ -205,8 +229,6 @@ export function clientFor(discovery) {
     getConnection: () => request(discovery, "GET", "/v1/connection"),
     selectContext: (contextId) =>
       request(discovery, "PUT", "/v1/connection", { body: { contextId } }),
-    selectContextShared: (contextId) =>
-      request(discovery, "PUT", "/v1/connection", { body: { contextId }, shared: true }),
     disconnect: () => request(discovery, "DELETE", "/v1/connection"),
     getDocument: (opts) => request(discovery, "GET", "/v1/context", opts)
   };
