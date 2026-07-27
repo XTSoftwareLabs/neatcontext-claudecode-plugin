@@ -194,7 +194,7 @@ A standard context contains:
   use the tools available to the context.
 
 Standard contexts are intended for enterprise-level use. Create and manage them
-in [NeatContext Desktop](https://www.neatcontext.com), which must be installed
+in [NeatContext Desktop](https://www.neatcontext.com), which required to be installed
 and open while you use them.
 
 ## License
