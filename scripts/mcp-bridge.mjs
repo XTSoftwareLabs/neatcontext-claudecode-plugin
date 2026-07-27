@@ -59,9 +59,26 @@ const GET_CONTEXT_TOOL = {
     "knowledge folders to search, and the extension tools available on this connection.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false }
 };
-const OFFLINE_GET_CONTEXT =
-  "NeatContext desktop is not reachable right now. Once it is running, use " +
-  "/neatcontext:use to connect a Context, then ask again.";
+// The one thing to say when a session has nothing to ground in. It is
+// deliberately about what to do *here*: the app being closed, mid-restart, or
+// holding no connection are all the same situation from inside Claude Code, and
+// all of them are answered by picking a context from this session.
+const NOTHING_CONNECTED =
+  "No NeatContext Context is connected to this session. Connect one with " +
+  "`/neatcontext:use`, or create a local one with `/neatcontext:create` — that one needs " +
+  "nothing else installed. Until then, do not answer from general knowledge.";
+
+// How connecting works in Claude Code, stated by the plugin because NeatContext
+// cannot state it: its own framing is written for its desktop client, where
+// connecting means opening the app, choosing a context and pressing a button.
+// Forwarded verbatim, that framing makes a session send the user off to do
+// exactly that — in a plugin whose whole point is that it never has to happen.
+// So this rides on both channels a session reads, and says which one wins.
+const CONNECTION_RULE = `## Connecting a context, in Claude Code
+
+Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:create\` makes a new local one from here.
+
+Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
 // The two tools that let a session change what it is grounded in. They are the
 // plugin's whole routing mechanism: there is no model in any process here, so
@@ -281,8 +298,8 @@ async function liteResponse(message, lite) {
         code: -32601,
         message:
           `"${params?.name}" is not available on a lite context. Lite contexts serve only ` +
-          "get_context; extension tools come from a standard context in the NeatContext " +
-          "desktop app."
+          "get_context; extension tools come from a standard context, which this session can " +
+          "connect with /neatcontext:use."
       }
     };
   }
@@ -290,6 +307,10 @@ async function liteResponse(message, lite) {
 }
 
 // --- Offline fallback: keep the MCP server usable without NeatContext --------
+
+function notConnected(id) {
+  return jsonRpcResult(id, { content: [{ type: "text", text: NOTHING_CONNECTED }], isError: false });
+}
 
 function offlineResponse(message) {
   const { id, method, params } = message;
@@ -308,9 +329,9 @@ function offlineResponse(message) {
   if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
   if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
   if (method === "tools/call" && params?.name === "get_context") {
-    return jsonRpcResult(id, { content: [{ type: "text", text: OFFLINE_GET_CONTEXT }], isError: false });
+    return notConnected(id);
   }
-  return { jsonrpc: "2.0", id, error: { code: -32601, message: OFFLINE_GET_CONTEXT } };
+  return { jsonrpc: "2.0", id, error: { code: -32601, message: NOTHING_CONNECTED } };
 }
 
 // --- Routing: the session picks its own context ------------------------------
@@ -566,23 +587,29 @@ async function handleMessage(message) {
   }
 }
 
-// The routing menu rides on both channels on purpose. In the handshake, so the
-// session knows what else exists without having to call anything; in every
-// get_context result, because that one is re-read on every call and the
-// handshake cannot be. Change the mode mid-session and the second channel is
-// what makes it take effect.
-async function withMenu(response, place) {
+// What the plugin adds to whichever source answered: how connecting works here,
+// and the routing menu when there is one. Both ride on both channels on purpose.
+// In the handshake, so the session knows what else exists without having to call
+// anything; in every get_context result, because that one is re-read on every
+// call and the handshake cannot be. Change the mode mid-session and the second
+// channel is what makes it take effect.
+//
+// The connection rule goes last, so it is the closest thing to the answer the
+// session is about to write — and it is the one part that is never omitted.
+async function pluginNotes() {
   const menu = await routingMenu();
-  if (!menu) {
-    return response;
-  }
+  return menu ? `${menu}\n\n${CONNECTION_RULE}` : CONNECTION_RULE;
+}
+
+async function withNotes(response, place) {
+  const notes = await pluginNotes();
   if (place === "instructions") {
     const existing = response.result.instructions;
     return {
       ...response,
       result: {
         ...response.result,
-        instructions: typeof existing === "string" ? `${existing}\n\n${menu}` : menu
+        instructions: typeof existing === "string" ? `${existing}\n\n${notes}` : notes
       }
     };
   }
@@ -594,7 +621,7 @@ async function withMenu(response, place) {
     ...response,
     result: {
       ...response.result,
-      content: [{ ...content[0], text: `${content[0].text}\n\n${menu}` }, ...content.slice(1)]
+      content: [{ ...content[0], text: `${content[0].text}\n\n${notes}` }, ...content.slice(1)]
     }
   };
 }
@@ -604,14 +631,19 @@ async function shapeResponse(message, response, lite, state) {
     return withoutHiddenPrompts(response);
   }
   if (message.method === "initialize" && response.result) {
-    return withMenu(response, "instructions");
+    return withNotes(response, "instructions");
   }
   if (message.method === "tools/list") {
     const connected = lite ? response : withConnectedTools(response, state);
     return await withRoutingTools(connected);
   }
   if (message.method === "tools/call" && message.params?.name === GET_CONTEXT_TOOL.name) {
-    return withMenu(response, "content");
+    // With nothing connected, NeatContext answers in terms of its own client:
+    // open the app, pick a context there. True of that client, wrong here — and
+    // the bridge already knows the connection state, so it says it itself rather
+    // than forwarding advice the user cannot act on from Claude Code.
+    const grounded = lite || state?.connected;
+    return withNotes(grounded ? response : notConnected(message.id), "content");
   }
   return response;
 }
