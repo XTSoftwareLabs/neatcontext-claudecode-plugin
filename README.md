@@ -86,7 +86,9 @@ The saved context keeps the investigation approach, system knowledge, findings,
 and verified resolution—not the raw conversation.
 
 When a similar issue appears later, connect the saved context in a new Claude
-Code session:
+Code session. The NeatContext plugin can also route you to the right context in
+`auto` or `ask` mode: `auto` switches on a clear match, while `ask` asks for
+your approval first.
 
 ```text
 You: /neatcontext:use event-partition-investigation
