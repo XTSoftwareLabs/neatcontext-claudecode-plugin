@@ -36,12 +36,15 @@ what one person learned.
 
 ## Install
 
-In Claude Code, run:
+In a terminal, run:
 
-```text
-/plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
-/plugin install neatcontext@neatcontext
+```bash
+claude plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
+claude plugin install neatcontext@neatcontext --scope user
 ```
+
+Then start or restart Claude Code. If you are already in Claude Code, the
+equivalent commands are `/plugin marketplace add` and `/plugin install`.
 
 Requirements:
 
