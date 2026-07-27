@@ -1,6 +1,6 @@
 ---
 description: Show the NeatContext connection status for this session
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 Report the current connection.

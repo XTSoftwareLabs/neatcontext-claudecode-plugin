@@ -1,6 +1,6 @@
 ---
 description: List the NeatContext contexts you can connect
-allowed-tools: Bash(node:*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 List the available contexts — lite ones stored by the plugin first, then

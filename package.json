@@ -1,6 +1,6 @@
 {
   "name": "neatcontext-claudecode-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Claude Code plugin to save conversations as reusable contexts and ground later sessions in them.",
   "type": "module",
   "private": true,
@@ -10,11 +10,12 @@
   },
   "scripts": {
     "check": "node --check src/core/companion-client.mjs && node --check src/core/lite-context.mjs && node --check src/core/routing.mjs && node --check src/core/selection.mjs && node --check src/core/session.mjs && node --check src/claude/mcp-bridge.mjs && node --check src/claude/neatcontext-cli.mjs && node --check src/claude/session.mjs && node --check tools/diff-coverage.mjs",
+    "validate:plugin": "claude plugin validate . --strict",
     "test": "node --test",
     "coverage": "node tools/diff-coverage.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/XTSoftwareLabs/neatcontext-claudecode-plugin.git"
+    "url": "https://github.com/XTSoftwareLabs/neatcontext-plugins.git"
   }
 }

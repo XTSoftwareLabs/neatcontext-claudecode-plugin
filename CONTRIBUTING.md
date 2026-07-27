@@ -21,14 +21,18 @@ Thanks for helping improve the NeatContext Claude Code plugin.
 The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 
 ```bash
-npm run check      # node --check on each helper script
-npm test           # node --test against a fake companion API
-npm run coverage   # every line you changed under src/ must be run by a test
+npm run check           # node --check on each helper script
+npm run validate:plugin # Claude Code marketplace validation, warnings included
+npm test                # node --test against a fake companion API
+npm run coverage        # every line you changed under src/ must be run by a test
 ```
 
-CI (`.github/workflows/ci.yml`) runs the first two on every pull request, on
-Node 18, 20 and 22 on Linux and on Node 22 on Windows, and the third once. The
-single required check is `ci`, which passes only when every job did.
+CI (`.github/workflows/ci.yml`) runs `npm run check` and `npm test` on every
+pull request, on Node 18, 20 and 22 on Linux and on Node 22 on Windows, and the
+coverage and marketplace checks once each. The marketplace job installs the
+current Claude Code release because Anthropic's review pipeline runs the same
+validator. Run `npm run validate:plugin` locally before submission as well. The
+single required check is `ci`, which passes only when every CI job did.
 
 ## Diff coverage
 

@@ -39,7 +39,7 @@ what one person learned.
 In Claude Code, run:
 
 ```text
-/plugin marketplace add XTSoftwareLabs/neatcontext-claudecode-plugin
+/plugin marketplace add XTSoftwareLabs/neatcontext-plugins
 /plugin install neatcontext@neatcontext
 ```
 
@@ -49,6 +49,13 @@ Requirements:
 - Node.js 18 or later
 - The NeatContext desktop app only if you want to use standard contexts created
   in the app
+
+The plugin manifest and its self-hosted marketplace can be checked before
+installation with:
+
+```bash
+claude plugin validate . --strict
+```
 
 ## Quick start: reuse a complex investigation
 
@@ -201,6 +208,24 @@ A standard context contains:
 Standard contexts are intended for enterprise-level use. Create and manage them
 in [NeatContext Desktop](https://www.neatcontext.com). You'll need the desktop
 app installed and open while using a standard context.
+
+## Security and data handling
+
+- The plugin runs only the Node.js files bundled in this repository. Its desktop
+  integration connects to the NeatContext companion service on `127.0.0.1`; the
+  plugin itself makes no outbound internet requests.
+- Lite contexts are stored locally under `~/.neatcontext/lite`. Saving a
+  conversation first creates a gitignored `.neatcontext-capture-*.json` scratch
+  file in the current project and removes it after a successful save.
+- A connected context's profile and selected knowledge files are read into the
+  Claude Code session when Claude uses them. They are then handled like other
+  content supplied to Claude Code. Standard-context extension tools may contact
+  services configured separately in NeatContext.
+- Import only bundles you trust. Their profile and Markdown knowledge become
+  instructions and source material available to Claude.
+- Deleting a lite context always requires confirmation. The plugin deletes
+  generated knowledge owned by a saved bundle, but never deletes an external
+  knowledge folder referenced by `/neatcontext:create`.
 
 ## License
 

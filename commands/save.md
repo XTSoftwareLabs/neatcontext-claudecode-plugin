@@ -2,7 +2,7 @@
 description: Save the useful work in this conversation as a reusable lite context
 argument-hint: [context name]
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Write, Bash(node:*)
+allowed-tools: Read, Glob, Grep, Write, Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 Save the durable work already present in this Claude Code conversation as a

@@ -1,13 +1,17 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "neatcontext",
-  "version": "0.2.0",
+  "displayName": "NeatContext",
+  "version": "0.2.1",
   "description": "Save Claude Code conversations as reusable lite contexts, create fresh ones, or connect standard contexts from NeatContext desktop.",
   "author": {
-    "name": "XTSoftwareLabs"
+    "name": "XTSoftwareLabs",
+    "url": "https://github.com/XTSoftwareLabs"
   },
-  "homepage": "https://github.com/XTSoftwareLabs/neatcontext-claudecode-plugin",
+  "homepage": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
+  "repository": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
   "license": "MIT",
-  "keywords": ["neatcontext", "context", "incidents", "grounding", "mcp"],
+  "keywords": ["neatcontext", "context", "knowledge-management", "grounding", "mcp"],
   "mcpServers": {
     "neatcontext": {
       "command": "node",
