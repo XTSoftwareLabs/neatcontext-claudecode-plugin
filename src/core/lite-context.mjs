@@ -1,6 +1,6 @@
 // Lite contexts: the local, NeatContext-free half of the plugin.
 //
-// A lite context is created from Claude Code and lives entirely on disk, so it
+// A lite context is created from an AI coding host and lives entirely on disk, so it
 // works with the NeatContext desktop app closed — or never installed. It is
 // deliberately small: one domain profile, one knowledge folder, no extensions,
 // no prompts. Anything richer is what the desktop app is for.
@@ -37,6 +37,13 @@ const MAX_ROUTING_DESCRIPTION = 240;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svn", ".hg", "__pycache__"]);
 
 export class LiteContextError extends Error {}
+
+function isConversationCapture(origin) {
+  return (
+    origin === "conversation" ||
+    (typeof origin === "string" && origin.endsWith("-conversation"))
+  );
+}
 
 export function liteHome() {
   return path.join(path.dirname(discoveryFilePath()), "lite");
@@ -78,7 +85,8 @@ function recordFor(directory, parsed) {
       storedKnowledgeFolder === "knowledge",
     routingDescription:
       typeof parsed.routingDescription === "string" ? parsed.routingDescription : "",
-    capturedFromConversation: parsed.capturedFrom === "claude-code-conversation",
+    capturedFrom: typeof parsed.capturedFrom === "string" ? parsed.capturedFrom : null,
+    capturedFromConversation: isConversationCapture(parsed.capturedFrom),
     profilePath: path.join(directory, "profile.md"),
     createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : null
   };
@@ -322,7 +330,7 @@ function normalizeCaptureKnowledge(knowledge) {
   return files;
 }
 
-// Saves work already present in Claude's conversation. Unlike `createLite`,
+// Saves work already present in the host conversation. Unlike `createLite`,
 // this owns the knowledge it writes. Relative storage is the portability
 // contract: copying this one directory to another machine keeps every pointer
 // valid without exposing or repairing an absolute path from the creator.
@@ -330,7 +338,8 @@ export async function createCapturedLite({
   name,
   profile,
   routingDescription,
-  knowledge
+  knowledge,
+  capturedFrom = "conversation"
 }) {
   const cleanName = normalizeName(name);
   const profileText = normalizeProfile(profile);
@@ -347,7 +356,7 @@ export async function createCapturedLite({
     createdAt: new Date().toISOString(),
     knowledgeFolder: "knowledge",
     knowledgeManaged: true,
-    capturedFrom: "claude-code-conversation",
+    capturedFrom: isConversationCapture(capturedFrom) ? capturedFrom : "conversation",
     routingDescription: useWhen
   };
 
@@ -402,10 +411,10 @@ export async function importCapturedLite({ bundleFolder, name }) {
     manifest.kind !== "lite" ||
     manifest.knowledgeManaged !== true ||
     manifest.knowledgeFolder !== "knowledge" ||
-    manifest.capturedFrom !== "claude-code-conversation"
+    !isConversationCapture(manifest.capturedFrom)
   ) {
     throw new LiteContextError(
-      "That folder is not a portable conversation context created by `/neatcontext:save`."
+      "That folder is not a portable conversation context bundle."
     );
   }
 
@@ -437,7 +446,8 @@ export async function importCapturedLite({ bundleFolder, name }) {
     name: typeof name === "string" && name.trim().length > 0 ? name : manifest.name,
     profile,
     routingDescription: manifest.routingDescription,
-    knowledge
+    knowledge,
+    capturedFrom: manifest.capturedFrom
   });
 }
 

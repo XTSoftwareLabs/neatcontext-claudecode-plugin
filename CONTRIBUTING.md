@@ -23,7 +23,7 @@ The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 ```bash
 npm run check      # node --check on each helper script
 npm test           # node --test against a fake companion API
-npm run coverage   # every line you changed under scripts/ must be run by a test
+npm run coverage   # every line you changed under src/ must be run by a test
 ```
 
 CI (`.github/workflows/ci.yml`) runs the first two on every pull request, on
@@ -33,7 +33,7 @@ single required check is `ci`, which passes only when every job did.
 ## Diff coverage
 
 `npm run coverage` runs the suite and fails if any line the branch adds or
-changes under `scripts/` was never executed. Whole-file coverage is not the bar
+changes under `src/` was never executed. Whole-file coverage is not the bar
 — much of this code predates the tests — but new code has to arrive with a test
 that runs it.
 
@@ -55,3 +55,24 @@ where everything is tracked already.
 
 Please keep the plugin decoupled from NeatContext's internals: it should only
 use the documented public companion API (see the README).
+
+## Repository layout
+
+The runtime is split at the host boundary:
+
+```text
+.claude-plugin/       Claude Code plugin metadata
+commands/             Claude Code slash-command definitions
+src/
+├── core/             reusable companion, storage, selection, and routing logic
+└── claude/           Claude Code process entry points and session adapter
+tests/                core and Claude integration coverage
+tools/                development and end-to-end utilities
+```
+
+`src/core/` must not import from `src/claude/` or read host-specific environment
+variables. Host integrations provide session identity through
+`configureSessionId` in `src/core/session.mjs`, then call the core operations.
+Keep host wording, command conventions, manifests, and process startup in the
+host directory. This dependency direction lets another host reuse the runtime
+without copying storage or companion behavior.

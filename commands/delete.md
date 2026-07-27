@@ -9,7 +9,7 @@ managed in the NeatContext desktop app.
 
 Your lite contexts:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" list --lite`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list --lite`
 
 The user asked to delete: $ARGUMENTS
 
@@ -20,7 +20,7 @@ Based on the list above:
 - If it matches one, run the following preview first:
 
   ```
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" delete "<name>"
+  node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" delete "<name>"
   ```
 
   Then **confirm with the user**, relaying exactly what the preview says will
@@ -31,7 +31,7 @@ Based on the list above:
 - Only after they confirm, run:
 
   ```
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" delete "<name>" --yes
+  node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" delete "<name>" --yes
   ```
 
   and relay the result. If the deleted context was the connected one, tell them

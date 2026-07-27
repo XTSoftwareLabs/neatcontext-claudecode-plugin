@@ -6,7 +6,7 @@ allowed-tools: Bash(node:*)
 
 Set or show how this session routes itself between contexts.
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" mode $ARGUMENTS`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" mode $ARGUMENTS`
 
 Relay the output above as it is. Do not explain the modes again if the command
 already listed them, and do not switch context as part of running this command.

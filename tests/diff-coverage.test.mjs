@@ -13,9 +13,9 @@ import {
 } from "../tools/diff-coverage.mjs";
 
 describe("which files the gate polices", () => {
-  it("takes the plugin's shipped scripts", () => {
-    assert.equal(isGatedFile("scripts/mcp-bridge.mjs"), true);
-    assert.equal(isGatedFile("scripts/lite-context.mjs"), true);
+  it("takes shared runtime and host adapter code", () => {
+    assert.equal(isGatedFile("src/claude/mcp-bridge.mjs"), true);
+    assert.equal(isGatedFile("src/core/lite-context.mjs"), true);
   });
 
   it("leaves out tests, docs, and the gate's own tooling", () => {

@@ -5,7 +5,7 @@ allowed-tools: Bash(node:*)
 
 Report the current connection.
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" status`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" status`
 
 Relay the status above to the user, keeping it short. If no context is connected,
 mention they can connect one with `/neatcontext:use`. If it reports a problem

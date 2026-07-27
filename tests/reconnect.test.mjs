@@ -17,7 +17,7 @@ import {
   startFakeCompanion
 } from "./fake-companion.mjs";
 
-const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
 let companion;
 
 // Routing is per session, and these tests are not about it: an empty id pins
@@ -47,7 +47,7 @@ beforeEach(async () => {
 
 function cli(...args) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
+    const child = spawn(process.execPath, [path.join(claude, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
       env: childEnv()
     });
@@ -59,7 +59,7 @@ function cli(...args) {
 
 // A stand-in for Claude Code: keeps one bridge process alive across turns.
 function openSession() {
-  const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
+  const child = spawn(process.execPath, [path.join(claude, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
     env: childEnv()
   });

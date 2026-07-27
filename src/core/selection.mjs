@@ -1,4 +1,4 @@
-// Selecting a context — the one operation both halves of the plugin perform.
+// Selecting a context — the operation shared by every host integration.
 //
 // The slash commands do it when the user names a context, and the MCP bridge
 // does it when the session routes itself to one. They must agree exactly: a

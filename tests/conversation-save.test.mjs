@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { closeSession } from "./fake-companion.mjs";
 
-const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
 
 let home;
 let discoveryFile;
@@ -44,7 +44,7 @@ beforeEach(async () => {
 
 function cli(...args) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
+    const child = spawn(process.execPath, [path.join(claude, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
       env: childEnv()
     });
@@ -100,7 +100,7 @@ function bundleFrom(output) {
 }
 
 function openSession() {
-  const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
+  const child = spawn(process.execPath, [path.join(claude, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
     env: childEnv()
   });
@@ -249,7 +249,7 @@ describe("saving the current conversation", () => {
 
 describe("capture validation", () => {
   it("rejects invalid identity, profile, routing, and knowledge shapes", async () => {
-    const { createCapturedLite } = await import("../scripts/lite-context.mjs");
+    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
     const hugeProfile = "p".repeat(128 * 1024 + 1);
     const hugeFile = "x".repeat(256 * 1024 + 1);
     const totalTooLarge = [
@@ -330,7 +330,7 @@ describe("capture validation", () => {
   });
 
   it("rejects every non-portable path form before writing", async () => {
-    const { createCapturedLite } = await import("../scripts/lite-context.mjs");
+    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
     const badPaths = [
       "",
       "x".repeat(181),
@@ -356,7 +356,7 @@ describe("capture validation", () => {
   });
 
   it("refuses a duplicate name", async () => {
-    const { createCapturedLite } = await import("../scripts/lite-context.mjs");
+    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
     await createCapturedLite(validCapture());
     await assert.rejects(() => createCapturedLite(validCapture()), /already exists/);
   });
@@ -476,7 +476,7 @@ describe("sharing a captured context", () => {
 
 describe("the Claude-facing save workflow", () => {
   it("keeps fresh creation separate and defines a privacy-aware model capture", async () => {
-    const root = path.dirname(scripts);
+    const root = path.resolve(claude, "..", "..");
     const saveCommand = await readFile(path.join(root, "commands", "save.md"), "utf8");
     const createCommand = await readFile(path.join(root, "commands", "create.md"), "utf8");
     const importCommand = await readFile(path.join(root, "commands", "import.md"), "utf8");

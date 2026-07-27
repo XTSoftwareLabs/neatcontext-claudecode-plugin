@@ -38,7 +38,7 @@ jobs:
       - run: npm test --if-present
 
   coverage:
-    # Every line a pull request adds to scripts/ has to be run by a test. Whole
+    # Every line a pull request adds to src/ has to be run by a test. Whole
     # -file numbers are not the bar: plenty of this code predates the suite. The
     # bar is that new code arrives with a test that exercises it.
     name: diff coverage

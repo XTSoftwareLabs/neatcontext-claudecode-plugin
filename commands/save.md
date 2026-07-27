@@ -58,7 +58,7 @@ Run this first so the new name and routing line can be contrastive with
 contexts that already exist:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" list
+node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list
 ```
 
 Use `$ARGUMENTS` as the name when it is non-empty; otherwise derive a short,
@@ -101,7 +101,7 @@ Use exactly this shape:
 Every knowledge path must be a short relative `.md` path. Then run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" save --from "${CLAUDE_PROJECT_DIR}/.neatcontext-capture-${CLAUDE_SESSION_ID}.json" --consume
+node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" save --from "${CLAUDE_PROJECT_DIR}/.neatcontext-capture-${CLAUDE_SESSION_ID}.json" --consume
 ```
 
 `--consume` removes only the scratch JSON after a successful save. If
