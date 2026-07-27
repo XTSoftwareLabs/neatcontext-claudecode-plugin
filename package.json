@@ -1,7 +1,7 @@
 {
-  "name": "neatcontext-claudecode-plugin",
+  "name": "neatcontext-plugins",
   "version": "0.2.1",
-  "description": "Claude Code plugin to save conversations as reusable contexts and ground later sessions in them.",
+  "description": "Host integrations that save AI coding work as reusable, domain-aware context.",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -9,8 +9,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check src/core/companion-client.mjs && node --check src/core/lite-context.mjs && node --check src/core/routing.mjs && node --check src/core/selection.mjs && node --check src/core/session.mjs && node --check src/claude/mcp-bridge.mjs && node --check src/claude/neatcontext-cli.mjs && node --check src/claude/session.mjs && node --check tools/diff-coverage.mjs",
-    "validate:plugin": "claude plugin validate . --strict",
+    "check": "node --check plugins/claude-code/neatcontext/src/core/companion-client.mjs && node --check plugins/claude-code/neatcontext/src/core/lite-context.mjs && node --check plugins/claude-code/neatcontext/src/core/routing.mjs && node --check plugins/claude-code/neatcontext/src/core/selection.mjs && node --check plugins/claude-code/neatcontext/src/core/session.mjs && node --check plugins/claude-code/neatcontext/src/claude/mcp-bridge.mjs && node --check plugins/claude-code/neatcontext/src/claude/neatcontext-cli.mjs && node --check plugins/claude-code/neatcontext/src/claude/session.mjs && node --check tools/diff-coverage.mjs",
+    "validate:plugin": "claude plugin validate . --strict && claude plugin validate plugins/claude-code/neatcontext --strict",
     "test": "node --test",
     "coverage": "node tools/diff-coverage.mjs"
   },

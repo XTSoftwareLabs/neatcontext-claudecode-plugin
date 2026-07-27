@@ -17,7 +17,15 @@ import {
   startFakeCompanion
 } from "./fake-companion.mjs";
 
-const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
+const claude = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "plugins",
+  "claude-code",
+  "neatcontext",
+  "src",
+  "claude"
+);
 
 let home;
 let discoveryFile;

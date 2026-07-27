@@ -14,8 +14,14 @@ import {
 
 describe("which files the gate polices", () => {
   it("takes shared runtime and host adapter code", () => {
-    assert.equal(isGatedFile("src/claude/mcp-bridge.mjs"), true);
-    assert.equal(isGatedFile("src/core/lite-context.mjs"), true);
+    assert.equal(
+      isGatedFile("plugins/claude-code/neatcontext/src/claude/mcp-bridge.mjs"),
+      true
+    );
+    assert.equal(
+      isGatedFile("plugins/claude-code/neatcontext/src/core/lite-context.mjs"),
+      true
+    );
   });
 
   it("leaves out tests, docs, and the gate's own tooling", () => {
@@ -23,7 +29,7 @@ describe("which files the gate polices", () => {
     assert.equal(isGatedFile("tests/lite-context.test.mjs"), false);
     assert.equal(isGatedFile("tools/diff-coverage.mjs"), false);
     assert.equal(isGatedFile("README.md"), false);
-    assert.equal(isGatedFile("commands/use.md"), false);
+    assert.equal(isGatedFile("plugins/claude-code/neatcontext/commands/use.md"), false);
   });
 });
 

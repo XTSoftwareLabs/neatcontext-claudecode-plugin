@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve the NeatContext Claude Code plugin.
+Thanks for helping improve the NeatContext host integrations.
 
 ## Branching & review
 
@@ -24,7 +24,7 @@ The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 npm run check           # node --check on each helper script
 npm run validate:plugin # Claude Code marketplace validation, warnings included
 npm test                # node --test against a fake companion API
-npm run coverage        # every line you changed under src/ must be run by a test
+npm run coverage        # every changed plugin source line must be run by a test
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm run check` and `npm test` on every
@@ -37,9 +37,9 @@ single required check is `ci`, which passes only when every CI job did.
 ## Diff coverage
 
 `npm run coverage` runs the suite and fails if any line the branch adds or
-changes under `src/` was never executed. Whole-file coverage is not the bar
-— much of this code predates the tests — but new code has to arrive with a test
-that runs it.
+changes under a plugin's `src/` directory was never executed. Whole-file
+coverage is not the bar — much of this code predates the tests — but new code
+has to arrive with a test that runs it.
 
 Almost everything here is exercised the way Claude Code exercises it: the MCP
 bridge and the CLI are spawned as child processes, which `node --test
@@ -65,18 +65,25 @@ use the documented public companion API (see the README).
 The runtime is split at the host boundary:
 
 ```text
-.claude-plugin/       Claude Code plugin metadata
-commands/             Claude Code slash-command definitions
-src/
-├── core/             reusable companion, storage, selection, and routing logic
-└── claude/           Claude Code process entry points and session adapter
-tests/                core and Claude integration coverage
-tools/                development and end-to-end utilities
+.claude-plugin/
+└── marketplace.json                repository-level Claude marketplace catalog
+plugins/
+└── claude-code/
+    └── neatcontext/                complete installable Claude plugin
+        ├── .claude-plugin/
+        │   └── plugin.json
+        ├── commands/               Claude Code slash-command definitions
+        └── src/
+            ├── core/               reusable storage, selection, and routing logic
+            └── claude/             Claude process entry points and session adapter
+tests/                              core and Claude integration coverage
+tools/                              development and end-to-end utilities
 ```
 
-`src/core/` must not import from `src/claude/` or read host-specific environment
-variables. Host integrations provide session identity through
-`configureSessionId` in `src/core/session.mjs`, then call the core operations.
-Keep host wording, command conventions, manifests, and process startup in the
-host directory. This dependency direction lets another host reuse the runtime
-without copying storage or companion behavior.
+The Claude plugin's `src/core/` must not import from `src/claude/` or read
+host-specific environment variables. Host integrations provide session
+identity through `configureSessionId` in `src/core/session.mjs`, then call the
+core operations. Keep host wording, command conventions, manifests, and process
+startup in the host directory. An installed plugin cannot reach outside its
+own directory, so any shared source must be packaged into each host plugin at
+release time.

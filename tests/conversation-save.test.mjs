@@ -13,7 +13,15 @@ import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { closeSession } from "./fake-companion.mjs";
 
-const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
+const claude = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "plugins",
+  "claude-code",
+  "neatcontext",
+  "src",
+  "claude"
+);
 
 let home;
 let discoveryFile;
@@ -249,7 +257,9 @@ describe("saving the current conversation", () => {
 
 describe("capture validation", () => {
   it("rejects invalid identity, profile, routing, and knowledge shapes", async () => {
-    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
+    const { createCapturedLite } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
     const hugeProfile = "p".repeat(128 * 1024 + 1);
     const hugeFile = "x".repeat(256 * 1024 + 1);
     const totalTooLarge = [
@@ -330,7 +340,9 @@ describe("capture validation", () => {
   });
 
   it("rejects every non-portable path form before writing", async () => {
-    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
+    const { createCapturedLite } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
     const badPaths = [
       "",
       "x".repeat(181),
@@ -356,7 +368,9 @@ describe("capture validation", () => {
   });
 
   it("refuses a duplicate name", async () => {
-    const { createCapturedLite } = await import("../src/core/lite-context.mjs");
+    const { createCapturedLite } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
     await createCapturedLite(validCapture());
     await assert.rejects(() => createCapturedLite(validCapture()), /already exists/);
   });
