@@ -3,7 +3,7 @@
   "name": "neatcontext",
   "displayName": "NeatContext",
   "version": "0.2.1",
-  "description": "Save Claude Code conversations as reusable lite contexts, create fresh ones, or connect standard contexts from NeatContext desktop.",
+  "description": "Save Claude Code work as reusable, domain-aware context",
   "author": {
     "name": "XTSoftwareLabs",
     "url": "https://github.com/XTSoftwareLabs"
