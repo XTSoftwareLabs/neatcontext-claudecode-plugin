@@ -23,18 +23,12 @@ what one person learned.
 
 | | Best for | What you get |
 |---|---|---|
-| **NeatContext lite context** | Reusing knowledge in fresh sessions or across a team | One domain profile that tells Claude how to work, plus one knowledge folder containing a session summary and focused files for decisions, guidance, troubleshooting, open items, or other durable knowledge. Lite contexts do not include extensions. |
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | <ul><li><strong>Lite context:</strong> one domain profile and one knowledge folder containing a session summary and focused files for decisions, guidance, troubleshooting, open items, or other durable knowledge. No extensions.</li><li><strong>Standard context for enterprise use:</strong> one domain profile, multiple knowledge folders with indexed retrieval, and extensions for your team's tools. Requires <a href="https://www.neatcontext.com">NeatContext Desktop</a> to be installed and open.</li></ul> |
 | **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
 | **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
 
 NeatContext does not copy the whole conversation. It keeps what will help Claude
 work accurately next time, without carrying over the entire chat.
-
-For enterprise-level context, use a **standard context** from
-[NeatContext Desktop](https://www.neatcontext.com). Like a lite context, each
-standard context has one domain profile. It can also use multiple knowledge
-folders with indexed retrieval and extensions for your team's tools. Standard
-contexts require NeatContext Desktop to be installed and open.
 
 ## Install
 
