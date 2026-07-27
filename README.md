@@ -4,6 +4,32 @@ Save useful work from a Claude Code conversation as a reusable context, then
 bring it into a later session. You can also create contexts from your own
 documentation or connect contexts from the NeatContext desktop app.
 
+## Why NeatContext?
+
+Domain knowledge is what helps an LLM answer accurately for your team—your
+systems, constraints, decisions, terminology, and ways of working.
+
+You naturally build that knowledge while doing hard work with Claude. Long
+conversations about debugging, planning, incidents, and implementation already
+contain discoveries that will matter again. NeatContext extracts the durable
+knowledge from those conversations and saves it as a structured context.
+
+Connect that context in a new session or during later work, and Claude can start
+with the knowledge it needs instead of asking you to explain everything again.
+You can also share the context with teammates, so the whole team benefits from
+what one person learned.
+
+### How is this different from saving or resuming a conversation?
+
+| | Best for | What you get |
+|---|---|---|
+| **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
+| **[Claude Code resume](https://code.claude.com/docs/en/sessions#resume-a-session)** | Continuing the same conversation | The original session and its conversation history |
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A focused, structured context containing the durable conclusions, decisions, guidance, and next steps |
+
+NeatContext does not copy the whole conversation. It keeps what will help Claude
+work accurately next time, without carrying over the entire chat.
+
 ## Install
 
 In Claude Code, run:
