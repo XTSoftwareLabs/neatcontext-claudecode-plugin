@@ -1,233 +1,135 @@
-# NeatContext plugin for Claude Code
+# NeatContext for Claude Code
 
-Ground a whole Claude Code session in your team's context — its domain profile,
-local knowledge, and read-only extension tools — with no app switching and no
-copy-paste.
-
-There are two kinds of context:
-
-- **Standard** — created in the **NeatContext desktop app**: many domain
-  profiles, many knowledge folders with indexed retrieval, and extension tools.
-- **Lite** — created right here with `/neatcontext:create`: **one** domain
-  profile and **one** knowledge folder, no extensions. It is stored locally by
-  the plugin and works with the desktop app closed, or never installed.
-
-## What it does
-
-- `/neatcontext:list` — list the contexts you can connect, of both kinds.
-- `/neatcontext:use [context]` — connect a context to the current session.
-- `/neatcontext:status` — show which context is connected.
-- `/neatcontext:create` — create a lite context, in three questions.
-- `/neatcontext:save [name]` — distill the current conversation into a reusable
-  lite context, including its domain profile and knowledge files.
-- `/neatcontext:import [folder]` — import a saved conversation context shared by
-  a teammate.
-- `/neatcontext:delete [context]` — delete a lite context.
-- `/neatcontext:mode [auto|ask|manual]` — how freely the session may switch
-  contexts on its own.
-
-Once a context is connected, the plugin's MCP server exposes the `get_context`
-tool. A **standard** context adds the context's **extension tools** (e.g. your
-incident/log/deploy connectors); switching contexts with `/neatcontext:use`
-takes effect live — the tool list refreshes without restarting the session. A
-**lite** context serves only `get_context`.
-
-The plugin does not surface NeatContext's `analyze_incident` prompt. A context
-is whatever you made it, and many are not about incidents at all, so an
-incident-shaped command in the menu would misrepresent what is connected.
-
-After a session connects a context, that context also frames the session. A
-**standard** context is framed by NeatContext, a **lite** context by the plugin,
-in plain terms that assume nothing about your subject area.
-
-## Switching contexts on its own
-
-Once you have more than one context, picking the right one by hand every time is
-the annoying part. So the plugin publishes a **routing menu** — one line per
-context, saying what that context is for — and Claude routes from it, the same
-way it picks a skill. No prompt classifier runs on your machine, and nothing is
-sent anywhere: the plugin supplies the menu, and the model already reading your
-message does the choosing.
-
-Three modes, set per session with `/neatcontext:mode`:
-
-- **`ask`** (default) — when your request plainly belongs to another context,
-  Claude says so and asks. It never switches on its own.
-- **`auto`** — it switches on a clear match and tells you it did, in one line.
-  When two contexts are both plausible it still asks rather than guessing.
-- **`manual`** — no routing at all. The switching tools are not even offered;
-  `/neatcontext:use` is the only way to change contexts.
-
-Detection is automatic in both `ask` and `auto` — the mode decides what happens
-*after* a switch looks warranted, not whether to look. `/neatcontext:mode auto
---global` changes the default for new sessions.
-
-Claude will not route on follow-ups or on anything continuing the current topic,
-and if you decline a switch it drops that context for the rest of the session.
-When it does get one wrong, correcting it teaches it: say what you actually
-meant and the words you used are remembered for next time.
-
-Each Claude Code window holds its **own** context, so switching in one leaves the
-others alone. A new session starts with no context; it connects one only through
-`/neatcontext:use` or the routing policy. Resuming an existing session restores
-that session's own selection.
-
-> Standard contexts need a NeatContext desktop build that keys connections by
-> session. Against an older build the plugin still works, but every window
-> shares one connection the way it used to — switching in one window re-grounds
-> the others. Lite contexts are unaffected; they never involve the app.
-
-### Where the descriptions come from
-
-`/neatcontext:create` and `/neatcontext:save` derive a context's routing
-description from its domain profile and store it. You are not asked to invent
-trigger words — the profile already says what the context covers, and a derived
-line comes out more specific than most people write by hand.
-
-Edit `profile.md` later and the description no longer matches it;
-`/neatcontext:status` tells you so, and you can ask Claude to refresh it. Nothing
-here regenerates it silently — the plugin has no model of its own.
-
-Standard contexts get a description the same way, derived once from the context
-document when you first connect one. Until then they route by name alone.
-
-## Lite contexts
-
-### Save the work already in this conversation
-
-Run `/neatcontext:save`, optionally followed by a name. The command uses the
-model already active in Claude Code — there is no second model call and no
-transcript reader — to separate the useful work into:
-
-- `profile.md`, the durable domain and behavioral guide;
-- `knowledge/session-summary.md`, the entry point for a future session; and
-- only the additional knowledge files the conversation warrants, such as
-  decisions, architecture, implementation notes, a runbook, troubleshooting, or
-  open items.
-
-It saves conclusions and working state rather than a raw transcript. The capture
-instructions explicitly omit credentials, tokens, private keys, environment
-contents, large diffs, full logs, and unrelated documents. The generated files
-are validated before the context becomes visible, and the whole context is
-created atomically.
-
-The result is immediately available to any later Claude Code session on the
-same machine through `/neatcontext:use`. It is not connected automatically, so
-saving work never changes what the current session is grounded in.
-
-Saved conversation contexts are self-contained:
-
-```
-<lite context>/
-├── context.json
-├── profile.md
-└── knowledge/
-    ├── session-summary.md
-    └── ...only files useful for this conversation
-```
-
-`context.json` uses a relative knowledge path and carries its routing
-description, so the directory is also a portable bundle. Share a copy of the
-folder printed by `/neatcontext:save`; a teammate with the plugin can run
-`/neatcontext:import <folder>`, then `/neatcontext:use <name>`. Import makes a
-new local copy and leaves the shared source untouched.
-
-### Create a fresh context
-
-`/neatcontext:create` asks three questions:
-
-1. **What is this context for?** What it covers, what Claude should do, what it
-   should avoid, how it should behave. Claude shapes your answer into a domain
-   profile and shows it to you before saving.
-2. **Which folder holds the knowledge?** Point it at a folder of TSGs, runbooks,
-   postmortems, or docs. The folder is referenced where it is — nothing is
-   copied or moved.
-3. **What should it be called?**
-
-The context is then stored under `~/.neatcontext/lite/<name>/` as a
-`context.json` and a `profile.md` you can edit by hand at any time. It stays
-there until you remove it with `/neatcontext:delete`. For a fresh context,
-deletion removes only those context files and **never touches the user-owned
-knowledge folder it references**. For a saved conversation context, deletion
-also removes the generated `knowledge/` folder inside its self-contained
-bundle; the confirmation says which case applies. Standard contexts can't be
-deleted from Claude Code — those are managed in the desktop app.
-
-Because `get_context` hands Claude the profile path and the folder path, Claude
-reads and searches them with its own file tools. That is all a lite context is:
-no index, no extensions, no live evidence connectors.
-
-## Requirements
-
-- **Claude Code 2.1.196+** (for the project-directory substitution used by the
-  conversation save workflow).
-- **Node.js 18+** (for the plugin's helper scripts and the MCP bridge).
-- For **standard** contexts: the **NeatContext desktop app**, installed and
-  **open**. The plugin talks to it over a local-only connection that exists only
-  while the app is running. Lite contexts need neither.
+Save useful work from a Claude Code conversation as a reusable context, then
+bring it into a later session. You can also create contexts from your own
+documentation or connect contexts from the NeatContext desktop app.
 
 ## Install
 
-From Claude Code:
+In Claude Code, run:
 
-```
+```text
 /plugin marketplace add XTSoftwareLabs/neatcontext-claudecode-plugin
 /plugin install neatcontext@neatcontext
 ```
 
-Then run `/neatcontext:save` to preserve work from the current conversation,
-`/neatcontext:create` to make a fresh lite context, or open the NeatContext
-desktop app and run `/neatcontext:use` to connect a standard one.
+Requirements:
 
-## How it connects
+- Claude Code 2.1.196 or later
+- Node.js 18 or later
+- The NeatContext desktop app only if you want to use standard contexts created
+  in the app
 
-A session is served by one of two sources, chosen from the context you selected.
+## Quick start: continue this conversation later
 
-**Lite contexts** are served locally, straight from the files above. No HTTP, no
-desktop app, nothing leaves your machine.
+When an existing conversation contains work you want to keep, save it as a lite
+context:
 
-**Standard contexts** are served by NeatContext. The plugin never reads
-NeatContext's internals or bundles its binary. It ships a generic **MCP bridge**
-(`src/claude/mcp-bridge.mjs`) that relays Model Context Protocol traffic to
-NeatContext's local companion endpoint, which hosts the real NeatContext MCP
-surface. The bridge only speaks:
+```text
+You: We have finished planning the checkout retry changes. Save this work for
+     the next session.
 
-- standard MCP (the protocol Claude Code already uses for tools/prompts), and
-- the documented companion HTTP contract on the loopback interface: a discovery
-  file at `~/.neatcontext/companion.json` (port + per-session token; override
-  with `NEATCONTEXT_COMPANION_FILE`) and a token-gated `POST /v1/mcp` plus a few
-  read endpoints (`/v1/health`, `/v1/contexts`, `/v1/connection`).
+You: /neatcontext:save checkout-retry
 
-The context you pick is recorded next to the discovery file in
-`~/.neatcontext/plugin-sessions/<session>.json` for the session where you picked
-it. Each record holds a kind, a context id, and a name, nothing else. A new
-session has no record and starts unconnected. For a standard context the record
-lets the plugin reconnect that session after NeatContext is restarted; for a
-lite context it *is* the connection, since no app is holding one.
+Claude:
+Lite context folder: <folder>
+Profile path: <folder>/profile.md
+Knowledge folder: <folder>/knowledge
+Use command: /neatcontext:use checkout-retry
+```
 
-Requests to NeatContext carry an `x-neatcontext-session` header so the app can
-keep each window's connection separate.
+The saved context keeps the useful conclusions, decisions, current state, and
+next steps—not the raw conversation. It is not connected automatically.
 
-Nothing leaves your machine, and no NeatContext code runs inside the plugin.
+Later, in a new Claude Code session:
 
-## Troubleshooting
+```text
+You: /neatcontext:use checkout-retry
 
-- **"No NeatContext Context is connected to this session."** Connect one with
-  `/neatcontext:use`, or create a local one with `/neatcontext:create`. If
-  `/neatcontext:list` shows no standard contexts, check that the NeatContext
-  desktop app is installed and running — only standard contexts need it.
-- **No contexts listed.** Create a lite one with `/neatcontext:create`, or a
-  standard one in the NeatContext app.
-- **Extension tools don't appear.** They come only from a standard context —
-  lite contexts have none. Connect one with `/neatcontext:use`; the tool list
-  refreshes when you do.
-- **Your lite context stopped working.** `/neatcontext:status` reports it if the
-  context's own files or its knowledge folder have been moved or deleted.
-- **You restarted NeatContext mid-session.** The app holds the connection in
-  memory, so quitting it disconnects the context. The plugin remembers what you
-  selected and reconnects it on the next question — no need to re-run
-  `/neatcontext:use`. If the context was deleted from NeatContext in the
-  meantime, the plugin says so and asks you to pick another.
+Claude: Connected to checkout-retry.
+
+You: Continue the checkout retry work. What should I implement next?
+
+Claude: Based on the saved context, the next step is to update the retry policy
+        and add coverage for the agreed failure cases.
+```
+
+## Commands
+
+### `/neatcontext:save [name]`
+
+Save the useful work in the current conversation as a new lite context. The
+name is optional; Claude chooses a specific name if you omit it.
+
+Use this after a conversation has produced decisions, plans, troubleshooting
+results, implementation notes, or other work worth continuing later.
+
+### `/neatcontext:use [name or number]`
+
+Connect a context to the current session. You can connect either a lite context
+or a standard context from the NeatContext desktop app.
+
+Run the command without a name to see the available choices. Each Claude Code
+window keeps its own connected context.
+
+### `/neatcontext:list`
+
+List all contexts you can connect. Lite contexts appear first, followed by
+standard contexts available from the NeatContext desktop app.
+
+### `/neatcontext:status`
+
+Show the context connected to the current session and the current routing mode.
+It also reports problems such as missing lite-context files or knowledge
+folders.
+
+### `/neatcontext:create`
+
+Create a fresh lite context instead of saving the current conversation. Claude
+asks what the context is for, which existing folder contains its knowledge, and
+what to call it.
+
+The knowledge folder stays where it is; the command does not copy or move it.
+
+### `/neatcontext:import [folder]`
+
+Import a lite context bundle shared by someone else. Import creates your own
+local copy and leaves the shared folder unchanged.
+
+After importing, connect it with `/neatcontext:use <name>`.
+
+### `/neatcontext:delete [name or number]`
+
+Delete a lite context after confirmation. Standard contexts must be deleted in
+the NeatContext desktop app.
+
+For a context created with `/neatcontext:create`, your original knowledge folder
+is left untouched. For a context created with `/neatcontext:save`, its generated
+knowledge is deleted with the context.
+
+### `/neatcontext:mode [auto|ask|manual]`
+
+Choose how the current session switches between contexts:
+
+- `ask` — ask before switching; this is the default
+- `auto` — switch on a clear match and tell you; ask when the choice is unclear
+- `manual` — switch only when you run `/neatcontext:use`
+
+Run `/neatcontext:mode` without an argument to show the current mode. Add
+`--global` to set the default for new sessions:
+
+```text
+/neatcontext:mode auto --global
+```
+
+## Context types
+
+- **Lite contexts** work locally without the NeatContext desktop app. Create
+  them from a conversation with `/neatcontext:save`, from an existing knowledge
+  folder with `/neatcontext:create`, or from a shared bundle with
+  `/neatcontext:import`.
+- **Standard contexts** are created and managed in the NeatContext desktop app.
+  Keep the app open while using them.
 
 ## License
 
