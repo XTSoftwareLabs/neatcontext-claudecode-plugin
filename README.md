@@ -1,8 +1,6 @@
 # NeatContext for Claude Code
 
-Save useful work from a Claude Code conversation as a reusable context, then
-bring it into a later session. You can also create contexts from your own
-documentation or connect contexts from the NeatContext desktop app.
+Extract domain knowledge and save useful work from a Claude Code conversation as a reusable structural context which can be reused in a later session or shared with others.
 
 ## Why NeatContext?
 
@@ -83,8 +81,7 @@ Use command: /neatcontext:use event-partition-investigation
 ```
 
 The saved context keeps the investigation approach, system knowledge, findings,
-and verified resolution—not the raw conversation. It is not connected
-automatically.
+and verified resolution—not the raw conversation.
 
 When a similar issue appears later, connect the saved context in a new Claude
 Code session:
@@ -109,20 +106,18 @@ Save the useful work in the current conversation as a new lite context. The
 name is optional; Claude chooses a specific name if you omit it.
 
 Use this after a conversation has produced decisions, plans, troubleshooting
-results, implementation notes, or other work worth continuing later.
+results, implementation notes, or other work worth persisting and reused later.
 
 ### `/neatcontext:use [name or number]`
 
-Connect a context to the current session. You can connect either a lite context
-or a standard context from the NeatContext desktop app.
+Connect a context to the current session.
 
 Run the command without a name to see the available choices. Each Claude Code
 window keeps its own connected context.
 
 ### `/neatcontext:list`
 
-List all contexts you can connect. Lite contexts appear first, followed by
-standard contexts available from the NeatContext desktop app.
+List all contexts you can connect.
 
 ### `/neatcontext:status`
 
@@ -181,10 +176,7 @@ A lite context contains:
   session summaries, and other knowledge Claude can use.
 - **No extensions.**
 
-Lite contexts work locally without NeatContext Desktop. Use
-`/neatcontext:save` to generate one from the current conversation,
-`/neatcontext:create` to use an existing knowledge folder, or
-`/neatcontext:import` to add one shared by a teammate.
+Use `/neatcontext:save` to generate one from the current conversation, `/neatcontext:create` to use an existing knowledge folder, or `/neatcontext:import` to add one shared by a teammate.
 
 ### Standard context
 
