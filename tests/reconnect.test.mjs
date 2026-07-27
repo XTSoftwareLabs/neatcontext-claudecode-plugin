@@ -232,7 +232,13 @@ describe("a session that never picked a context", () => {
     const session = openSession();
     try {
       await session.handshake();
-      assert.match(contextText(await session.getContext()), new RegExp(NO_CONTEXT_TEXT.slice(0, 40)));
+      const answer = contextText(await session.getContext());
+      assert.match(answer, /No NeatContext Context is connected to this session/);
+      // The app's own answer to this question sends the user to a button in the
+      // desktop app. The plugin knows the connection state and says what can
+      // actually be done from here instead.
+      assert.doesNotMatch(answer, new RegExp(NO_CONTEXT_TEXT.slice(0, 40)));
+      assert.match(answer, /\/neatcontext:use/);
       assert.equal(companion.state.puts, 0);
     } finally {
       await session.close();

@@ -226,6 +226,28 @@ describe("session instructions for a lite context", () => {
     }
   });
 
+  // With no app to ask, every answer is the plugin's own — and the one thing it
+  // must not do is send the user off to software that is not running (or, on
+  // this machine, may never have been installed) to press a button in it.
+  it("keeps the answers actionable from here with no app at all", async () => {
+    const session = openSession();
+    try {
+      await session.handshake();
+      const answer = contextText(await session.getContext());
+      assert.match(answer, /No NeatContext Context is connected to this session/);
+      assert.match(answer, /\/neatcontext:use/);
+      assert.match(answer, /\/neatcontext:create/);
+      assert.doesNotMatch(answer, /Open NeatContext|Connect Claude Desktop/);
+
+      // Any other tool is unknown, and says the same thing rather than failing
+      // with a bare protocol error.
+      const other = await session.send("tools/call", { name: "demo_anything", arguments: {} });
+      assert.match(other.error.message, /No NeatContext Context is connected to this session/);
+    } finally {
+      await session.close();
+    }
+  });
+
   // The reported failure: a session started while NeatContext was still coming
   // up answered "no context is currently connected" to everything, for its whole
   // life, without ever calling get_context — which by then would have returned a
@@ -280,6 +302,24 @@ describe("a session grounded in a lite context", () => {
       await session.handshake();
       assert.deepEqual(await session.contextToolNames(), ["get_context"]);
       assert.deepEqual((await session.send("prompts/list")).result.prompts, []);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("refuses an extension tool by pointing at the command that would get one", async () => {
+    await createContext("Payments Runbooks");
+    await cli("use", "Payments");
+
+    const session = openSession();
+    try {
+      await session.handshake();
+      const refused = await session.send("tools/call", { name: "demo_ctx_payments", arguments: {} });
+      assert.match(refused.error.message, /not available on a lite context/);
+      // Extension tools do come from a standard context — but connecting one is
+      // something this session does, not something the user goes elsewhere for.
+      assert.match(refused.error.message, /\/neatcontext:use/);
+      assert.doesNotMatch(refused.error.message, /desktop app/);
     } finally {
       await session.close();
     }

@@ -604,6 +604,88 @@ describe("the menu", () => {
   });
 });
 
+// The reported failure: asked about an incident while grounded in an unrelated
+// context, the session named the right one — and then told the user to open the
+// NeatContext desktop app, select it there, and click "Connect Claude Desktop".
+// None of that is how this plugin works, and none of it is something the user
+// can act on from Claude Code. Two things put it in the window: NeatContext's
+// own framing, written for the client where that button exists, and the model's
+// prior about a desktop app it has heard of. Both are answered the same way — by
+// the plugin stating, on every channel a session reads, that connecting happens
+// here.
+describe("how the session is told to connect", () => {
+  // The app's advice, verbatim. Matching "desktop app" would catch the plugin's
+  // own rule, which names it in order to forbid it.
+  const desktopConnect = /Connect Claude Desktop|Open NeatContext, select/;
+
+  it("rides on both channels, on either kind of context", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    for (const context of ["Payments", "payment team"]) {
+      await cli("use", context);
+      const session = openSession();
+      try {
+        const { instructions } = (await session.handshake()).result;
+        assert.match(instructions, /Contexts are connected from this session and nowhere else/);
+        assert.match(instructions, /Never tell the user to open the NeatContext desktop app/);
+        // NeatContext's own framing is still forwarded intact — the plugin
+        // corrects it rather than editing it, and the correction comes last.
+        assert.ok(
+          instructions.indexOf("nowhere else") > instructions.indexOf("reconnect from NeatContext")
+        );
+        // The handshake cannot be revised; get_context is what carries the rule
+        // to a session that has been running for hours.
+        assert.match(text(await session.getContext()), /connected from this session and nowhere else/);
+      } finally {
+        await session.close();
+      }
+    }
+  });
+
+  it("survives manual mode, where there is no menu to carry it", async () => {
+    await createContext("Payments Runbooks", { useWhen: "refunds" });
+    await cli("use", "Payments");
+    await cli({ session: "s-manual" }, "mode", "manual");
+
+    const session = openSession("s-manual");
+    try {
+      const { instructions } = (await session.handshake()).result;
+      assert.doesNotMatch(instructions, /Contexts available on this machine/);
+      // Manual is where the user connects by hand, so the one rule about *how*
+      // they do that matters most, not least.
+      assert.match(instructions, /\/neatcontext:use <name>/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("answers for itself when NeatContext has nothing connected", async () => {
+    const session = openSession();
+    try {
+      await session.handshake();
+      const answer = text(await session.getContext());
+      assert.doesNotMatch(answer, desktopConnect, "the app's own advice is not forwarded");
+      assert.match(answer, /Connect one with `\/neatcontext:use`/);
+      assert.match(answer, /`\/neatcontext:create`/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("keeps saying it while the connected context answers normally", async () => {
+    await cli("use", "payment team");
+    const session = openSession();
+    try {
+      await session.handshake();
+      const answer = text(await session.getContext());
+      // The real answer is untouched — only the plugin's own notes follow it.
+      assert.match(answer, /Connected context: payment team/);
+      assert.doesNotMatch(answer, desktopConnect);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 // --- switching ---------------------------------------------------------------
 
 describe("use_context", () => {

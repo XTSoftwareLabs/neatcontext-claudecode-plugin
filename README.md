@@ -162,8 +162,10 @@ Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 
 ## Troubleshooting
 
-- **"NeatContext desktop is not reachable."** Open the NeatContext app and make
-  sure a workspace is loaded, then retry. Only standard contexts need it.
+- **"No NeatContext Context is connected to this session."** Connect one with
+  `/neatcontext:use`, or create a local one with `/neatcontext:create`. If
+  `/neatcontext:list` shows no standard contexts, the desktop app is closed or
+  has no workspace loaded — only standard contexts need it.
 - **No contexts listed.** Create a lite one with `/neatcontext:create`, or a
   standard one in the NeatContext app.
 - **Extension tools don't appear.** They come only from a standard context —

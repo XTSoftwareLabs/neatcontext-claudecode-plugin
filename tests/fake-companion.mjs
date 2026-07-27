@@ -8,15 +8,23 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 
+// What the app answers when it has nothing connected. It is written for the
+// desktop client, where connecting is a button in the app — advice a Claude Code
+// user cannot act on, and must never be handed. The plugin answers this case
+// itself rather than forwarding it.
 export const NO_CONTEXT_TEXT =
-  "No NeatContext Context is connected to this session. Run /neatcontext:use to " +
-  "choose one, then ask again.";
+  "No NeatContext Context is connected. Open NeatContext, select a Context, and click " +
+  "\"Connect Claude Desktop\", then ask again.";
 
 // Stands in for the session instructions the desktop backend returns from
-// initialize: a NeatContext-AI persona built around incident investigation.
+// initialize: a NeatContext-AI persona built around incident investigation,
+// carrying the same reconnect advice the real one does — written for the desktop
+// client, and forwarded here verbatim because the plugin does not rewrite what
+// NeatContext says about its own contexts.
 export const NEATCONTEXT_INSTRUCTIONS =
   "You are NeatContext AI, a local-first incident investigation assistant. " +
-  "Always call get_context before answering an incident question.";
+  "Always call get_context before answering an incident question. If no Context is " +
+  "connected, stop and tell the user to reconnect from NeatContext.";
 
 // The plugin's own routing tools. They ride on every tool list, so the tests
 // that are about *extension* tools filter them out rather than restate them:
