@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import readline from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -250,6 +250,37 @@ describe("a session that never picked a context", () => {
       assert.deepEqual(await session.contextToolNames(), ["get_context"]);
     } finally {
       await session.close();
+    }
+  });
+});
+
+// Claude Code spawns its MCP servers as it starts, so a session can hand-shake
+// before NeatContext has finished coming up — which is likelier right after
+// restarting both. The reported failure: every question in that session answered
+// "no context is currently connected", for the session's whole life, while
+// get_context would have returned the Context all along.
+describe("a session that starts before NeatContext is up", () => {
+  it("gets grounded once the app arrives, without being restarted", async () => {
+    await cli("use", "payment", "team");
+    const saved = await readFile(companion.discoveryFile, "utf8");
+    // The app is not listening yet: nothing has published a discovery file.
+    await rm(companion.discoveryFile, { force: true });
+
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      // Instructions are frozen here and cannot be revised, so they must not
+      // settle a question that is about to change.
+      assert.match(instructions, /call the get_context tool and let its answer decide/);
+
+      // NeatContext finishes starting.
+      await writeFile(companion.discoveryFile, saved);
+
+      // The same session, no restart: the remembered context comes back.
+      assert.match(contextText(await session.getContext()), /Connected context: payment team/);
+    } finally {
+      await session.close();
+      await writeFile(companion.discoveryFile, saved);
     }
   });
 });

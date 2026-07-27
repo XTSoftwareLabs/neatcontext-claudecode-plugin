@@ -215,8 +215,28 @@ describe("session instructions for a lite context", () => {
     const session = openSession();
     try {
       const { instructions } = (await session.handshake()).result;
-      assert.match(instructions, /No NeatContext Context is connected/);
+      assert.match(instructions, /No NeatContext Context was connected at the moment/);
       assert.match(instructions, /\/neatcontext:create/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  // The reported failure: a session started while NeatContext was still coming
+  // up answered "no context is currently connected" to everything, for its whole
+  // life, without ever calling get_context — which by then would have returned a
+  // perfectly good Context. Instructions are fixed at the handshake, so the only
+  // fix is to never state the connection state there as a settled fact.
+  it("does not let a handshake with nothing connected settle the question", async () => {
+    const session = openSession();
+    try {
+      const { instructions } = (await session.handshake()).result;
+      // Defers to the tool instead of answering from this text.
+      assert.match(instructions, /call the get_context tool and let its answer decide/);
+      assert.match(instructions, /must not tell the user nothing is connected/);
+      assert.match(instructions, /fixed at the handshake and cannot be updated/);
+      // And never asserts the negative the session would otherwise repeat.
+      assert.doesNotMatch(instructions, /there is nothing to ground answers in/);
     } finally {
       await session.close();
     }
