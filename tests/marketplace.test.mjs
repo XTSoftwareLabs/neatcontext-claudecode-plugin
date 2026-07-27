@@ -31,12 +31,14 @@ function parseFrontmatter(markdown, file) {
 }
 
 test("marketplace metadata is complete, canonical, and version-aligned", async () => {
-  const [pluginText, marketplaceText, packageText, bridgeText, readme] = await Promise.all([
+  const [pluginText, marketplaceText, packageText, bridgeText, readme, privacy] =
+    await Promise.all([
     read(`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`),
     read(".claude-plugin/marketplace.json"),
     read("package.json"),
     read(`${CLAUDE_PLUGIN_ROOT}/src/claude/mcp-bridge.mjs`),
-    read("README.md")
+    read("README.md"),
+    read("PRIVACY.md")
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
@@ -70,6 +72,9 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   assert.match(readme, /claude plugin install neatcontext@neatcontext --scope user/);
   assert.doesNotMatch(readme, /XTSoftwareLabs\/neatcontext-claudecode-plugin/);
   assert.match(readme, /^## Security and data handling$/m);
+  assert.match(readme, /\[Privacy Policy\]\(PRIVACY\.md\)/);
+  assert.match(privacy, /^# Privacy Policy$/m);
+  assert.match(privacy, /does not send telemetry, analytics, crash reports/);
 });
 
 test("commands pre-approve only the bundled CLI and never interpolate arguments into shell", async () => {

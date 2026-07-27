@@ -215,6 +215,8 @@ app installed and open while using a standard context.
 
 ## Security and data handling
 
+- See the [Privacy Policy](PRIVACY.md) for the complete description of local
+  storage, network communication, retention, and deletion.
 - The plugin runs only the Node.js files bundled in this repository. Its desktop
   integration connects to the NeatContext companion service on `127.0.0.1`; the
   plugin itself makes no outbound internet requests.
