@@ -33,7 +33,7 @@ const api = async (method, route, { body, session } = {}) => {
 
 // A window: one bridge process kept alive, exactly as Claude Code keeps it.
 function openWindow(sessionId) {
-  const child = spawn(process.execPath, [`${PLUGIN}/scripts/mcp-bridge.mjs`], {
+  const child = spawn(process.execPath, [`${PLUGIN}/src/claude/mcp-bridge.mjs`], {
     stdio: ["pipe", "pipe", "ignore"],
     env: { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId }
   });
@@ -84,7 +84,7 @@ function openWindow(sessionId) {
 // A slash command: a fresh process, as Claude Code spawns it.
 const slash = (sessionId, ...args) =>
   new Promise((resolve) => {
-    const child = spawn(process.execPath, [`${PLUGIN}/scripts/neatcontext-cli.mjs`, ...args], {
+    const child = spawn(process.execPath, [`${PLUGIN}/src/claude/neatcontext-cli.mjs`, ...args], {
       stdio: ["ignore", "pipe", "ignore"],
       env: { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId }
     });

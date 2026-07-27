@@ -19,6 +19,7 @@
 import { copyFile as copyFileRaw, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { sessionId } from "./session.mjs";
 
 export const NOT_RUNNING_MESSAGE =
   "NeatContext desktop is not running. Install the NeatContext desktop app and " +
@@ -53,22 +54,13 @@ export function selectionFilePath() {
   return path.join(path.dirname(discoveryFilePath()), "plugin-selection.json");
 }
 
-// Claude Code sets this per session, and everything the plugin runs inherits
-// it: the MCP bridge it spawns, and the slash commands that shell out. Absent —
-// an older host, or a direct CLI run — every session shares one selection, the
-// way they always did.
-export function sessionId() {
-  const id = process.env.CLAUDE_CODE_SESSION_ID;
-  return typeof id === "string" && id.trim().length > 0 ? id.trim() : null;
-}
-
-// One file per Claude Code window. A window is where a context belongs: you
+// One file per host session. A session is where a context belongs: you
 // open one to work on a thing, and the context is what that thing is. Sharing a
 // single selection meant connecting in one window silently re-grounded every
 // other, which is invisible from inside them.
 //
 // The global file above stays the *default* — what a window with no selection
-// of its own starts on — so restarting Claude Code still picks up the context
+// of its own starts on — so restarting the host still picks up the context
 // you were last using, and a pre-session plugin process still finds what it
 // expects to find.
 export function sessionSelectionFilePath(id) {
@@ -98,8 +90,8 @@ export async function readDiscovery() {
 // silently followed. Two windows, and only one of them ever chose anything.
 //
 // Snapshotting the default into this session's own file on first read fixes it
-// without giving up the thing the default is for: a new window still starts on
-// the context you were last using, so restarting Claude Code picks up where you
+// without giving up the thing the default is for: a new session still starts on
+// the context you were last using, so restarting the host picks up where you
 // left off. It just stops tracking that value afterwards.
 export async function readSelection() {
   const id = sessionId();

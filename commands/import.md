@@ -16,7 +16,7 @@ If no folder was supplied, ask for it and stop. Otherwise run the command below,
 passing the whole argument as one quoted path:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" import --from "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" import --from "$ARGUMENTS"
 ```
 
 Relay the result. Do not connect the imported context automatically. If its name

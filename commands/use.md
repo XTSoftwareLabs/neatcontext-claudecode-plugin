@@ -10,7 +10,7 @@ here with `/neatcontext:create`).
 
 Result of the selection attempt:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" use $ARGUMENTS`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" use $ARGUMENTS`
 
 Based on the output above:
 

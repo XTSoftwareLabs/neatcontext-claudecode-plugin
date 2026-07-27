@@ -3,7 +3,7 @@
 // No process in this plugin has a model, so none of them classify prompts.
 // What they do is publish a menu — one line per context, saying what that
 // context is for — and let the session's own model route from it. That is how
-// Claude Code routes skills, and a context is close enough to a skill for the
+// Coding hosts route skills, and a context is close enough to a skill for the
 // same mechanism to work: cheap metadata always present, the expensive content
 // (the profile, the knowledge folder) fetched only once something is chosen.
 //
@@ -25,7 +25,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { discoveryFilePath, sessionId } from "./companion-client.mjs";
+import { discoveryFilePath } from "./companion-client.mjs";
+import { sessionId } from "./session.mjs";
 
 export { sessionId };
 
@@ -86,7 +87,7 @@ export async function readRouting() {
 }
 
 async function writeRouting(state) {
-  // Sessions accumulate forever otherwise — one per Claude Code window, ever.
+  // Sessions accumulate forever otherwise — one per host window, ever.
   const sessions = Object.entries(state.sessions)
     .sort((a, b) => (b[1]?.updatedAt ?? "").localeCompare(a[1]?.updatedAt ?? ""))
     .slice(0, MAX_SESSIONS);

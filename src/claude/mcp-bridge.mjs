@@ -30,13 +30,20 @@
 // closed or never installed.
 
 import readline from "node:readline";
-import { clientFor, ensureConnection, readDiscovery, readSelection, request } from "./companion-client.mjs";
+import "./session.mjs";
+import {
+  clientFor,
+  ensureConnection,
+  readDiscovery,
+  readSelection,
+  request
+} from "../core/companion-client.mjs";
 import {
   LITE_MISSING_MESSAGE,
   listKnowledgeFiles,
   readLite,
   renderLiteContext
-} from "./lite-context.mjs";
+} from "../core/lite-context.mjs";
 import {
   addAlias,
   menuEntries,
@@ -47,8 +54,8 @@ import {
   resolveMode,
   sessionId,
   switchPolicy
-} from "./routing.mjs";
-import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
+} from "../core/routing.mjs";
+import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
 
 const SERVER_INFO = { name: "neatcontext", version: "0.2.0" };
 const GET_CONTEXT_TOOL = {

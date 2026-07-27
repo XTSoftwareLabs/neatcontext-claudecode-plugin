@@ -19,7 +19,8 @@
 // Exit code is always 0: the output is meant to be read, not branched on.
 
 import { readFile, rm } from "node:fs/promises";
-import { clearSelection, ensureConnection, readSelection } from "./companion-client.mjs";
+import "./session.mjs";
+import { clearSelection, ensureConnection, readSelection } from "../core/companion-client.mjs";
 import {
   createCapturedLite,
   createLite,
@@ -28,7 +29,7 @@ import {
   LiteContextError,
   listKnowledgeFiles,
   readProfileText
-} from "./lite-context.mjs";
+} from "../core/lite-context.mjs";
 import {
   addAlias,
   isCardStale,
@@ -38,8 +39,8 @@ import {
   resolveMode,
   sessionId,
   setMode
-} from "./routing.mjs";
-import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
+} from "../core/routing.mjs";
+import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
 
 const UPGRADE_NOTE =
   "A lite context holds one domain profile and one knowledge folder. For multiple " +
@@ -461,7 +462,10 @@ async function commandSave(flags) {
   }
 
   try {
-    const result = await createCapturedLite(capture);
+    const result = await createCapturedLite({
+      ...capture,
+      capturedFrom: "claude-code-conversation"
+    });
     await putCard(result.record.id, {
       useWhen: result.routingDescription,
       source: result.profileText

@@ -17,7 +17,7 @@ import {
   startFakeCompanion
 } from "./fake-companion.mjs";
 
-const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
 
 let home;
 let discoveryFile;
@@ -56,7 +56,7 @@ beforeEach(async () => {
 
 function cli(...args) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
+    const child = spawn(process.execPath, [path.join(claude, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
       env: childEnv()
     });
@@ -79,7 +79,7 @@ async function createContext(name, { folder = docs, profile = "# Payments\n\n## 
 // CLAUDE_CODE_SESSION_ID would let the bridge pin a selection under the id of
 // whatever session is *running the tests*, which then outlives beforeEach.
 function openSession() {
-  const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
+  const child = spawn(process.execPath, [path.join(claude, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
     env: childEnv()
   });

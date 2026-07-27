@@ -189,7 +189,7 @@ desktop app, nothing leaves your machine.
 
 **Standard contexts** are served by NeatContext. The plugin never reads
 NeatContext's internals or bundles its binary. It ships a generic **MCP bridge**
-(`scripts/mcp-bridge.mjs`) that relays Model Context Protocol traffic to
+(`src/claude/mcp-bridge.mjs`) that relays Model Context Protocol traffic to
 NeatContext's local companion endpoint, which hosts the real NeatContext MCP
 surface. The bridge only speaks:
 

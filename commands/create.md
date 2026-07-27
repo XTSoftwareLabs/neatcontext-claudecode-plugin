@@ -51,7 +51,7 @@ scratchpad directory (e.g. `profile.md`) — never pass the prose as a command-l
 argument, it will not survive shell quoting — then run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" create --name "<name>" --knowledge "<folder>" --profile-from "<scratchpad>/profile.md" --use-when "<routing description>"
+node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" create --name "<name>" --knowledge "<folder>" --profile-from "<scratchpad>/profile.md" --use-when "<routing description>"
 ```
 
 The routing description is a single line, so it does survive quoting — but keep

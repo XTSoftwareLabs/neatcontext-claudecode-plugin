@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { ROUTING_TOOL_NAMES, closeSession, startFakeCompanion } from "./fake-companion.mjs";
 
-const scripts = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "scripts");
+const claude = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "claude");
 
 let companion;
 let home;
@@ -28,6 +28,8 @@ let routingFile;
 // pointing this at the fixture before the first call is enough to isolate the
 // in-process tests — no import order to get right.
 process.env.NEATCONTEXT_COMPANION_FILE = "";
+await import("../src/claude/session.mjs");
+const { configureSessionId } = await import("../src/core/session.mjs");
 
 const {
   MODES,
@@ -45,9 +47,9 @@ const {
   sessionId,
   setMode,
   switchPolicy
-} = await import("../scripts/routing.mjs");
+} = await import("../src/core/routing.mjs");
 const { applySelection, listAllContexts, resolveContext } = await import(
-  "../scripts/selection.mjs"
+  "../src/core/selection.mjs"
 );
 
 before(async () => {
@@ -98,7 +100,7 @@ const childEnv = (id = "") => ({
 function cli(...args) {
   const id = args[0]?.session !== undefined ? args.shift().session : "";
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(scripts, "neatcontext-cli.mjs"), ...args], {
+    const child = spawn(process.execPath, [path.join(claude, "neatcontext-cli.mjs"), ...args], {
       stdio: ["ignore", "pipe", "inherit"],
       env: childEnv(id)
     });
@@ -126,7 +128,7 @@ async function createContext(name, { profile = `\n# ${name}\n\n## Purpose\nOwns 
 }
 
 function openSession(id = "") {
-  const child = spawn(process.execPath, [path.join(scripts, "mcp-bridge.mjs")], {
+  const child = spawn(process.execPath, [path.join(claude, "mcp-bridge.mjs")], {
     stdio: ["pipe", "pipe", "inherit"],
     env: childEnv(id)
   });
@@ -405,6 +407,13 @@ describe("the mode", () => {
     process.env.CLAUDE_CODE_SESSION_ID = "";
     assert.equal(sessionId(), null);
     process.env.CLAUDE_CODE_SESSION_ID = previous;
+  });
+
+  it("rejects an invalid host session provider", () => {
+    assert.throws(
+      () => configureSessionId(null),
+      /The session id provider must be a function/
+    );
   });
 
   it("is reported next to the connected context", async () => {

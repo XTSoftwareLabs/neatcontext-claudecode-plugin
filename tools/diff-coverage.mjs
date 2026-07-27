@@ -9,7 +9,7 @@
 // The awkward part is where this plugin's code runs. `node --test
 // --experimental-test-coverage` only instruments the test runner's own process,
 // and almost everything here is exercised the way Claude Code exercises it:
-// `scripts/mcp-bridge.mjs` and `scripts/neatcontext-cli.mjs` are spawned as
+// `src/claude/mcp-bridge.mjs` and `src/claude/neatcontext-cli.mjs` are spawned as
 // child processes. So instead we set NODE_V8_COVERAGE, which every child
 // inherits, and merge what the whole process tree wrote.
 //
@@ -33,7 +33,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 // The plugin's shipped code. Tests are excluded on purpose: a test file is
 // covered by definition, and counting it would only dilute the gate.
 export function isGatedFile(repoRelativePath) {
-  return repoRelativePath.startsWith("scripts/") && repoRelativePath.endsWith(".mjs");
+  return repoRelativePath.startsWith("src/") && repoRelativePath.endsWith(".mjs");
 }
 
 // --- what changed ------------------------------------------------------------

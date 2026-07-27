@@ -11,7 +11,7 @@
   "mcpServers": {
     "neatcontext": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-bridge.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/src/claude/mcp-bridge.mjs"]
     }
   }
 }
