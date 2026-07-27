@@ -45,38 +45,54 @@ Requirements:
 - The NeatContext desktop app only if you want to use standard contexts created
   in the app
 
-## Quick start: continue this conversation later
+## Quick start: reuse a complex investigation
 
-When an existing conversation contains work you want to keep, save it as a lite
-context:
+Suppose you work through a difficult production issue with Claude:
 
 ```text
-You: We have finished planning the checkout retry changes. Save this work for
-     the next session.
+You: Some orders take ten minutes to update, but overall queue lag looks normal.
+     Help me investigate.
 
-You: /neatcontext:save checkout-retry
+Claude: The delay affects only one partition. Its consumer is spending most of
+        its time deserializing a small number of unusually large events.
+
+You: Those events come from bulk catalog updates. They all use the same tenant
+     ID as the partition key. Could that explain the pattern?
+
+Claude: Yes. The shared key sends every bulk update to one partition. Large
+        payloads then block later order events in that partition, while the
+        aggregate lag metric hides the hotspot.
+
+You: We confirmed it. Splitting the bulk updates removed the delay. In future,
+     check per-partition lag, event size, partition keys, and deserialization
+     time before scaling consumers.
+
+You: /neatcontext:save event-partition-investigation
 
 Claude:
 Lite context folder: <folder>
 Profile path: <folder>/profile.md
 Knowledge folder: <folder>/knowledge
-Use command: /neatcontext:use checkout-retry
+Use command: /neatcontext:use event-partition-investigation
 ```
 
-The saved context keeps the useful conclusions, decisions, current state, and
-next steps—not the raw conversation. It is not connected automatically.
+The saved context keeps the investigation approach, system knowledge, findings,
+and verified resolution—not the raw conversation. It is not connected
+automatically.
 
-Later, in a new Claude Code session:
+When a similar issue appears later, connect the saved context in a new Claude
+Code session:
 
 ```text
-You: /neatcontext:use checkout-retry
+You: /neatcontext:use event-partition-investigation
 
-Claude: Connected to checkout-retry.
+Claude: Connected to event-partition-investigation.
 
-You: Continue the checkout retry work. What should I implement next?
+You: Shipment updates are delayed, but overall queue lag is low. Help me
+     investigate.
 
-Claude: Based on the saved context, the next step is to update the retry policy
-        and add coverage for the agreed failure cases.
+Claude: I will start with the checks from the saved context: per-partition lag,
+        event size, partition keys, and deserialization time.
 ```
 
 ## Commands
