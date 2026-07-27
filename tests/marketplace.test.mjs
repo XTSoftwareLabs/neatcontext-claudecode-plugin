@@ -63,8 +63,9 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   );
   assert.match(
     readme,
-    /\/plugin marketplace add https:\/\/github\.com\/XTSoftwareLabs\/neatcontext-plugins\.git/
+    /claude plugin marketplace add https:\/\/github\.com\/XTSoftwareLabs\/neatcontext-plugins\.git/
   );
+  assert.match(readme, /claude plugin install neatcontext@neatcontext --scope user/);
   assert.doesNotMatch(readme, /XTSoftwareLabs\/neatcontext-claudecode-plugin/);
   assert.match(readme, /^## Security and data handling$/m);
 });
