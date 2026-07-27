@@ -149,14 +149,34 @@ Run `/neatcontext:mode` without an argument to show the current mode. Add
 
 ## Context types
 
-- **Lite contexts** have one domain profile and one knowledge folder, with no
-  extensions. They work locally without NeatContext Desktop. Create them from a
-  conversation with `/neatcontext:save`, from an existing knowledge folder with
-  `/neatcontext:create`, or from a shared bundle with `/neatcontext:import`.
-- **Standard contexts** have one domain profile and support multiple indexed
-  knowledge folders and extensions. They are created and managed in
-  [NeatContext Desktop](https://www.neatcontext.com), which must be open while
-  you use them.
+### Lite context
+
+A lite context contains:
+
+- **One domain profile** — your team's rules, terminology, constraints, and
+  preferred ways of working. It guides how Claude behaves and answers.
+- **One knowledge folder** — TSGs, runbooks, decisions, troubleshooting notes,
+  session summaries, and other knowledge Claude can use.
+- **No extensions.**
+
+Lite contexts work locally without NeatContext Desktop. Use
+`/neatcontext:save` to generate one from the current conversation,
+`/neatcontext:create` to use an existing knowledge folder, or
+`/neatcontext:import` to add one shared by a teammate.
+
+### Standard context
+
+A standard context contains:
+
+- **One domain profile** — the team's rules that guide Claude's behavior.
+- **Multiple knowledge folders** — indexed collections of team documentation
+  that Claude can search for relevant information.
+- **Extensions** — connections to internal and external systems that let Claude
+  use the tools available to the context.
+
+Standard contexts are intended for enterprise-level use. Create and manage them
+in [NeatContext Desktop](https://www.neatcontext.com), which must be installed
+and open while you use them.
 
 ## License
 
