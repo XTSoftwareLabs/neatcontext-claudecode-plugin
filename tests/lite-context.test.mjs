@@ -168,8 +168,11 @@ describe("listing with no standard contexts", () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");
 
-    assert.match(listed, /Standard contexts:\s+\(none — open the NeatContext desktop app/);
     assert.match(listed, /Lite contexts:\s+1\. Payments Runbooks/);
+    assert.match(
+      listed,
+      /Standard contexts:\s+\(none — make sure the NeatContext desktop app is installed and running\)/
+    );
   });
 
   it("numbers the lite contexts from 1 when there are no standard ones", async () => {
@@ -503,12 +506,11 @@ describe("lite and standard side by side", () => {
     }
   });
 
-  it("lists the two kinds in their own sections", async () => {
+  it("lists the two kinds in their own sections, lite first", async () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");
 
-    assert.match(listed, /Standard contexts:/);
-    assert.match(listed, /Lite contexts:/);
+    assert.ok(listed.indexOf("Lite contexts:") < listed.indexOf("Standard contexts:"));
     // A populated list explains nothing: the headings carry it.
     assert.doesNotMatch(listed, /NeatContext desktop app/);
     // The kind is the section, so rows no longer repeat it.
@@ -520,13 +522,13 @@ describe("lite and standard side by side", () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");
 
-    // Two standard contexts from the fake companion, then the lite one.
-    assert.match(listed, /1\. payment team/);
-    assert.match(listed, /2\. Dokploy/);
-    assert.match(listed, /3\. Payments Runbooks/);
+    // The lite one, then the two standard contexts from the fake companion.
+    assert.match(listed, /1\. Payments Runbooks/);
+    assert.match(listed, /2\. payment team/);
+    assert.match(listed, /3\. Dokploy/);
 
-    assert.match(await cli("use", "3"), /Connected the "Payments Runbooks" lite context/);
-    assert.match(await cli("use", "1"), /Connected the "payment team" context/);
+    assert.match(await cli("use", "1"), /Connected the "Payments Runbooks" lite context/);
+    assert.match(await cli("use", "2"), /Connected the "payment team" context/);
   });
 
   it("drops the app's connection when a lite context is selected", async () => {

@@ -5,6 +5,8 @@
 //   list [--lite]              list contexts (standard from the app, plus lite)
 //   use [query]                connect by number, exact name, or unique substring
 //   create --name --knowledge  create a lite context (--profile-from <file>)
+//   save --from <capture.json>  save this conversation as a portable lite context
+//   import --from <bundle>      import a portable conversation context
 //   delete <query> [--yes]     delete a lite context
 //   mode [auto|ask|manual]     how the session may route itself between contexts
 //   describe <query> --use-when   record what a context should be routed for
@@ -16,11 +18,13 @@
 //
 // Exit code is always 0: the output is meant to be read, not branched on.
 
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { clearSelection, ensureConnection, readSelection } from "./companion-client.mjs";
 import {
+  createCapturedLite,
   createLite,
   deleteLite,
+  importCapturedLite,
   LiteContextError,
   listKnowledgeFiles,
   readProfileText
@@ -85,34 +89,28 @@ function formatSection(title, contexts, offset, connectedId, emptyNote) {
   return [title, ...rows].join("\n");
 }
 
-// Where the standard contexts went. Only worth saying when there are none to
-// show: a populated list needs no explaining.
-function noStandardNote(state) {
-  if (!state.appRunning) {
-    return "(none — open the NeatContext desktop app to use standard contexts)";
-  }
-  if (!state.appListed) {
-    return "(none — NeatContext desktop is open but has no workspace loaded)";
-  }
-  return "(none — create one in the NeatContext desktop app)";
-}
+// Why the standard contexts are missing is not worth three different sentences:
+// app closed, no workspace loaded, and none created all lead the user to the
+// same place. One line covers every case.
+const NO_STANDARD_NOTE =
+  "(none — make sure the NeatContext desktop app is installed and running)";
 
-// The two kinds are listed apart, because they are different things: one comes
-// from the desktop app, one is the plugin's own. The numbering runs continuously
-// across both sections so `use <number>` still indexes the merged list the way
-// the user is reading it.
+// The two kinds are listed apart, because they are different things: one is the
+// plugin's own, one comes from the desktop app. Lite goes first — it is the half
+// that is always there. The numbering runs continuously across both sections so
+// `use <number>` still indexes the merged list the way the user is reading it.
 function formatList(state) {
   const standard = state.contexts.filter((context) => context.kind === "standard");
   const connectedId = state.connected?.id ?? null;
   return [
-    formatSection("Standard contexts:", standard, 0, connectedId, noStandardNote(state)),
     formatSection(
       "Lite contexts:",
       state.lite,
-      standard.length,
+      0,
       connectedId,
       "(none — create one with `/neatcontext:create`)"
-    )
+    ),
+    formatSection("Standard contexts:", standard, state.lite.length, connectedId, NO_STANDARD_NOTE)
   ].join("\n\n");
 }
 
@@ -133,7 +131,7 @@ function formatLiteList(state) {
 // selection is authoritative on its own and needs no app at all.
 async function loadState() {
   const selection = await readSelection();
-  const { contexts, lite, standard, client, appListed } = await listAllContexts();
+  const { contexts, lite, standard, client } = await listAllContexts();
 
   let appState = null;
   if (client) {
@@ -170,8 +168,6 @@ async function loadState() {
     lite,
     standard,
     connected,
-    appRunning: Boolean(client),
-    appListed,
     restoreFailed: appState?.restoreFailed === true
   };
 }
@@ -298,7 +294,7 @@ async function commandUse(state, query) {
 // and let the session do it.
 async function nudgeForDescription(target) {
   const routing = await readRouting();
-  if ((routing.cards[target.id]?.useWhen ?? "").length > 0) {
+  if ((routing.cards[target.id]?.useWhen || target.routingDescription || "").length > 0) {
     return;
   }
   print("");
@@ -441,6 +437,78 @@ async function commandCreate(flags) {
   }
 }
 
+// The model in the active Claude Code session writes the capture spec: it is
+// the only process that can see the conversation, and reusing it avoids a
+// second model call or a transcript reader. This command validates that output,
+// turns it into files, and registers the resulting lite context atomically.
+async function commandSave(flags) {
+  const source = typeof flags.from === "string" ? flags.from : "";
+  if (source.trim().length === 0) {
+    print("Pass the generated conversation capture with --from <capture.json>.");
+    return;
+  }
+
+  let capture;
+  try {
+    capture = JSON.parse(await readFile(source, "utf8"));
+  } catch {
+    print(`Could not read a valid conversation capture JSON file at ${source}.`);
+    return;
+  }
+  if (capture?.schema !== 1) {
+    print("Unsupported conversation capture schema. Expected schema 1.");
+    return;
+  }
+
+  try {
+    const result = await createCapturedLite(capture);
+    await putCard(result.record.id, {
+      useWhen: result.routingDescription,
+      source: result.profileText
+    }).catch(() => undefined);
+    if (flags.consume === true || flags.consume === "true") {
+      await rm(source, { force: true });
+    }
+    print(`Lite context folder: ${result.record.directory}`);
+    print(`Profile path: ${result.record.profilePath}`);
+    print(`Knowledge folder: ${result.record.knowledgeFolder}`);
+    print(`Use command: /neatcontext:use ${result.record.name}`);
+  } catch (error) {
+    if (error instanceof LiteContextError) {
+      print(error.message);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function commandImport(flags) {
+  const source = typeof flags.from === "string" ? flags.from : "";
+  const name = typeof flags.name === "string" ? flags.name : "";
+  try {
+    const result = await importCapturedLite({ bundleFolder: source, name });
+    await putCard(result.record.id, {
+      useWhen: result.routingDescription,
+      source: result.profileText
+    }).catch(() => undefined);
+    print(`Imported the "${result.record.name}" conversation context.`);
+    print(`  Domain profile:   ${result.record.profilePath}`);
+    print(
+      `  Knowledge folder: ${result.record.knowledgeFolder} ` +
+        `(${result.knowledgeFileCount} files)`
+    );
+    print(`  Local bundle:     ${result.record.directory}`);
+    print(`  Connect it with:  /neatcontext:use ${result.record.name}`);
+    print(`The shared source folder (${source}) was left untouched.`);
+  } catch (error) {
+    if (error instanceof LiteContextError) {
+      print(error.message);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function commandDelete(state, query, flags) {
   if (query.length === 0) {
     print("Which lite context should I delete?");
@@ -474,7 +542,11 @@ async function commandDelete(state, query, flags) {
   if (flags.yes !== true && flags.yes !== "true") {
     print(`This will delete the "${target.name}" lite context:`);
     print(`  ${target.directory}`);
-    print(`Its knowledge folder (${target.knowledgeFolder}) will NOT be touched.`);
+    print(
+      target.knowledgeManaged
+        ? `Its generated knowledge folder (${target.knowledgeFolder}) is inside the bundle and will be deleted.`
+        : `Its knowledge folder (${target.knowledgeFolder}) will NOT be touched.`
+    );
     print("Re-run with --yes to confirm.");
     return;
   }
@@ -485,7 +557,11 @@ async function commandDelete(state, query, flags) {
     return;
   }
   print(`Deleted the "${deleted.name}" lite context.`);
-  print(`Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`);
+  print(
+    deleted.knowledgeManaged
+      ? `Its generated knowledge folder (${deleted.knowledgeFolder}) was deleted with it.`
+      : `Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`
+  );
   if (state.connected?.id === deleted.id) {
     await clearSelection();
     print("It was the connected context, so this session is no longer grounded in one.");
@@ -498,6 +574,14 @@ async function run() {
 
   if (command === "create") {
     await commandCreate(flags);
+    return;
+  }
+  if (command === "save") {
+    await commandSave(flags);
+    return;
+  }
+  if (command === "import") {
+    await commandImport(flags);
     return;
   }
   // Reads no context list and touches no connection: the one command that still
@@ -535,7 +619,7 @@ async function run() {
   }
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | create | delete | mode | alias | describe."
+      "Use: status | list | use | create | save | import | delete | mode | alias | describe."
   );
 }
 

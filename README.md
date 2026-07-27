@@ -18,6 +18,10 @@ There are two kinds of context:
 - `/neatcontext:use [context]` — connect a context to the current session.
 - `/neatcontext:status` — show which context is connected.
 - `/neatcontext:create` — create a lite context, in three questions.
+- `/neatcontext:save [name]` — distill the current conversation into a reusable
+  lite context, including its domain profile and knowledge files.
+- `/neatcontext:import [folder]` — import a saved conversation context shared by
+  a teammate.
 - `/neatcontext:delete [context]` — delete a lite context.
 - `/neatcontext:mode [auto|ask|manual]` — how freely the session may switch
   contexts on its own.
@@ -76,10 +80,10 @@ restarting still picks up where you left off.
 
 ### Where the descriptions come from
 
-`/neatcontext:create` derives a context's routing description from the domain
-profile you wrote, shows it to you with the profile, and stores it. You are not
-asked to invent trigger words — the profile already says what the context covers,
-and a derived line comes out more specific than most people write by hand.
+`/neatcontext:create` and `/neatcontext:save` derive a context's routing
+description from its domain profile and store it. You are not asked to invent
+trigger words — the profile already says what the context covers, and a derived
+line comes out more specific than most people write by hand.
 
 Edit `profile.md` later and the description no longer matches it;
 `/neatcontext:status` tells you so, and you can ask Claude to refresh it. Nothing
@@ -89,6 +93,47 @@ Standard contexts get a description the same way, derived once from the context
 document when you first connect one. Until then they route by name alone.
 
 ## Lite contexts
+
+### Save the work already in this conversation
+
+Run `/neatcontext:save`, optionally followed by a name. The command uses the
+model already active in Claude Code — there is no second model call and no
+transcript reader — to separate the useful work into:
+
+- `profile.md`, the durable domain and behavioral guide;
+- `knowledge/session-summary.md`, the entry point for a future session; and
+- only the additional knowledge files the conversation warrants, such as
+  decisions, architecture, implementation notes, a runbook, troubleshooting, or
+  open items.
+
+It saves conclusions and working state rather than a raw transcript. The capture
+instructions explicitly omit credentials, tokens, private keys, environment
+contents, large diffs, full logs, and unrelated documents. The generated files
+are validated before the context becomes visible, and the whole context is
+created atomically.
+
+The result is immediately available to any later Claude Code session on the
+same machine through `/neatcontext:use`. It is not connected automatically, so
+saving work never changes what the current session is grounded in.
+
+Saved conversation contexts are self-contained:
+
+```
+<lite context>/
+├── context.json
+├── profile.md
+└── knowledge/
+    ├── session-summary.md
+    └── ...only files useful for this conversation
+```
+
+`context.json` uses a relative knowledge path and carries its routing
+description, so the directory is also a portable bundle. Share a copy of the
+folder printed by `/neatcontext:save`; a teammate with the plugin can run
+`/neatcontext:import <folder>`, then `/neatcontext:use <name>`. Import makes a
+new local copy and leaves the shared source untouched.
+
+### Create a fresh context
 
 `/neatcontext:create` asks three questions:
 
@@ -102,8 +147,11 @@ document when you first connect one. Until then they route by name alone.
 
 The context is then stored under `~/.neatcontext/lite/<name>/` as a
 `context.json` and a `profile.md` you can edit by hand at any time. It stays
-there until you remove it with `/neatcontext:delete`, which deletes those two
-files and **never touches your knowledge folder**. Standard contexts can't be
+there until you remove it with `/neatcontext:delete`. For a fresh context,
+deletion removes only those context files and **never touches the user-owned
+knowledge folder it references**. For a saved conversation context, deletion
+also removes the generated `knowledge/` folder inside its self-contained
+bundle; the confirmation says which case applies. Standard contexts can't be
 deleted from Claude Code — those are managed in the desktop app.
 
 Because `get_context` hands Claude the profile path and the folder path, Claude
@@ -112,6 +160,8 @@ no index, no extensions, no live evidence connectors.
 
 ## Requirements
 
+- **Claude Code 2.1.196+** (for the project-directory substitution used by the
+  conversation save workflow).
 - **Node.js 18+** (for the plugin's helper scripts and the MCP bridge).
 - For **standard** contexts: the **NeatContext desktop app**, installed and
   **open**. The plugin talks to it over a local-only connection that exists only
@@ -126,8 +176,9 @@ From Claude Code:
 /plugin install neatcontext@neatcontext
 ```
 
-Then either run `/neatcontext:create` to make a lite context on the spot, or open
-the NeatContext desktop app and run `/neatcontext:use` to connect a standard one.
+Then run `/neatcontext:save` to preserve work from the current conversation,
+`/neatcontext:create` to make a fresh lite context, or open the NeatContext
+desktop app and run `/neatcontext:use` to connect a standard one.
 
 ## How it connects
 
@@ -164,8 +215,8 @@ Nothing leaves your machine, and no NeatContext code runs inside the plugin.
 
 - **"No NeatContext Context is connected to this session."** Connect one with
   `/neatcontext:use`, or create a local one with `/neatcontext:create`. If
-  `/neatcontext:list` shows no standard contexts, the desktop app is closed or
-  has no workspace loaded — only standard contexts need it.
+  `/neatcontext:list` shows no standard contexts, check that the NeatContext
+  desktop app is installed and running — only standard contexts need it.
 - **No contexts listed.** Create a lite one with `/neatcontext:create`, or a
   standard one in the NeatContext app.
 - **Extension tools don't appear.** They come only from a standard context —

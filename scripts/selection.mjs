@@ -15,8 +15,9 @@ import { clearSelection, connect, writeSelection } from "./companion-client.mjs"
 import { listLite } from "./lite-context.mjs";
 
 // Everything connectable right now, of both kinds, in the order the list
-// command numbers them. `client` is null when the desktop app is not running,
-// which is normal: lite contexts do not need it.
+// command numbers them — lite first, because those are always there. `client` is
+// null when the desktop app is not running, which is normal: lite contexts do
+// not need it.
 export async function listAllContexts() {
   const lite = (await listLite()).map((context) => ({ ...context, kind: "lite" }));
   const client = await connect();
@@ -32,7 +33,7 @@ export async function listAllContexts() {
       }));
     }
   }
-  return { contexts: [...standard, ...lite], lite, standard, client, appListed };
+  return { contexts: [...lite, ...standard], lite, standard, client, appListed };
 }
 
 // By number (as the list prints them), exact name, or unique substring. Shared

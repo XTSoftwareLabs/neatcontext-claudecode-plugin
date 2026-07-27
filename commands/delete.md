@@ -17,9 +17,17 @@ Based on the list above:
 
 - If no name was given, or it does not clearly match exactly one lite context,
   show the list and ask which one they mean. Do not guess.
-- If it matches one, **confirm with the user first**, naming the context. Say
-  that its domain profile will be deleted and that its knowledge folder — their
-  own docs — is left untouched.
+- If it matches one, run the following preview first:
+
+  ```
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/neatcontext-cli.mjs" delete "<name>"
+  ```
+
+  Then **confirm with the user**, relaying exactly what the preview says will
+  happen. A fresh context from `/neatcontext:create` points at user-owned
+  knowledge that is left untouched. A conversation context from
+  `/neatcontext:save` owns generated knowledge inside its bundle, so that
+  generated folder is deleted with the context.
 - Only after they confirm, run:
 
   ```

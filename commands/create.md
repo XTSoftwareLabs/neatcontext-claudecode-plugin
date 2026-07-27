@@ -7,6 +7,10 @@ Guide the user through creating a **lite context**: one domain profile, one
 knowledge folder, no extensions. It is stored locally by the plugin and works
 whether or not the NeatContext desktop app is installed.
 
+This remains the deliberate flow for a fresh context. If the user wants to
+distill work already present in the current conversation, direct them to
+`/neatcontext:save` instead.
+
 Ask these three questions **one at a time**, waiting for each answer. Do not run
 any command until all three are answered.
 

@@ -299,7 +299,11 @@ export function menuEntries(contexts, state) {
     id: context.id,
     name: context.name,
     kind: context.kind,
-    useWhen: state.cards[context.id]?.useWhen ?? "",
+    // Captured lite contexts carry their routing description in the portable
+    // bundle as well as in this machine's routing cache. The embedded copy is
+    // what makes a teammate's imported bundle routable before they have ever
+    // connected it.
+    useWhen: state.cards[context.id]?.useWhen || context.routingDescription || "",
     aliases: state.cards[context.id]?.aliases ?? []
   }));
 }

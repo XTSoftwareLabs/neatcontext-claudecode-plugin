@@ -1,19 +1,22 @@
 // Lite contexts: the local, NeatContext-free half of the plugin.
 //
-// A lite context is created from Claude Code (`/neatcontext:create`) and lives
-// entirely on disk, so it works with the NeatContext desktop app closed — or
-// never installed. It is deliberately small: one domain profile, one knowledge
-// folder, no extensions, no prompts. Anything richer is what the desktop app is
-// for.
+// A lite context is created from Claude Code and lives entirely on disk, so it
+// works with the NeatContext desktop app closed — or never installed. It is
+// deliberately small: one domain profile, one knowledge folder, no extensions,
+// no prompts. Anything richer is what the desktop app is for.
 //
 //   <home>/lite/<slug>-<suffix>/context.json   { schema, id, name, kind, ... }
 //   <home>/lite/<slug>-<suffix>/profile.md     the domain profile, hand-editable
+//   <home>/lite/<slug>-<suffix>/knowledge/     conversation capture, when saved
 //
 // <home> is the directory holding the companion discovery file, so
 // NEATCONTEXT_COMPANION_FILE stays the single override that isolates tests.
 //
-// The knowledge folder is *referenced*, never copied: deleting a lite context
-// removes the two files above and nothing of the user's.
+// `/neatcontext:create` references a user-owned knowledge folder and never
+// copies or deletes it. `/neatcontext:save` creates a managed folder inside the
+// context directory instead. That makes a saved conversation self-contained
+// and portable, and also means deleting that context deletes its generated
+// knowledge with it.
 
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -26,6 +29,11 @@ const SCHEMA = 1;
 const MAX_NAME_LENGTH = 80;
 const MAX_LISTED_FILES = 200;
 const MAX_LISTING_DEPTH = 3;
+const MAX_CAPTURE_FILES = 24;
+const MAX_CAPTURE_FILE_BYTES = 256 * 1024;
+const MAX_CAPTURE_TOTAL_BYTES = 1024 * 1024;
+const MAX_PROFILE_BYTES = 128 * 1024;
+const MAX_ROUTING_DESCRIPTION = 240;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svn", ".hg", "__pycache__"]);
 
 export class LiteContextError extends Error {}
@@ -51,12 +59,26 @@ function recordFor(directory, parsed) {
   if (parsed?.kind !== "lite" || typeof parsed.id !== "string" || typeof parsed.name !== "string") {
     return null;
   }
+  const storedKnowledgeFolder =
+    typeof parsed.knowledgeFolder === "string" ? parsed.knowledgeFolder : "";
+  const knowledgeFolder =
+    storedKnowledgeFolder.length === 0
+      ? ""
+      : path.isAbsolute(storedKnowledgeFolder)
+        ? storedKnowledgeFolder
+        : path.resolve(directory, storedKnowledgeFolder);
   return {
     id: parsed.id,
     name: parsed.name,
     kind: "lite",
     directory,
-    knowledgeFolder: typeof parsed.knowledgeFolder === "string" ? parsed.knowledgeFolder : "",
+    knowledgeFolder,
+    knowledgeManaged:
+      parsed.knowledgeManaged === true &&
+      storedKnowledgeFolder === "knowledge",
+    routingDescription:
+      typeof parsed.routingDescription === "string" ? parsed.routingDescription : "",
+    capturedFromConversation: parsed.capturedFrom === "claude-code-conversation",
     profilePath: path.join(directory, "profile.md"),
     createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : null
   };
@@ -115,10 +137,7 @@ async function directoryExists(target) {
   }
 }
 
-// Creates the context from an already-answered wizard. Everything is validated
-// before anything is written, and the context is assembled in a temp directory
-// then renamed into place, so a failure never leaves a half-context behind.
-export async function createLite({ name, knowledgeFolder, profile }) {
+function normalizeName(name) {
   const cleanName = (name ?? "").trim();
   if (cleanName.length === 0) {
     throw new LiteContextError("A context name is required.");
@@ -129,11 +148,45 @@ export async function createLite({ name, knowledgeFolder, profile }) {
   if (/[\r\n]/.test(cleanName)) {
     throw new LiteContextError("A context name must be a single line.");
   }
+  return cleanName;
+}
 
+function normalizeProfile(profile) {
   const cleanProfile = (profile ?? "").trim();
   if (cleanProfile.length === 0) {
     throw new LiteContextError("The domain profile is empty. Describe what the context is for.");
   }
+  if (Buffer.byteLength(cleanProfile, "utf8") > MAX_PROFILE_BYTES) {
+    throw new LiteContextError("Keep the domain profile under 128 KB.");
+  }
+  return `${cleanProfile}\n`;
+}
+
+async function ensureUniqueName(cleanName) {
+  const existing = await listLite();
+  if (existing.some((context) => context.name.toLowerCase() === cleanName.toLowerCase())) {
+    throw new LiteContextError(
+      `A lite context named "${cleanName}" already exists. Pick another name, or delete ` +
+        "that one with `/neatcontext:delete`."
+    );
+  }
+}
+
+function contextPaths(cleanName) {
+  const suffix = randomBytes(6).toString("hex");
+  return {
+    suffix,
+    directory: path.join(liteHome(), `${slugify(cleanName)}-${suffix}`),
+    staging: path.join(liteHome(), `.staging-${suffix}`)
+  };
+}
+
+// Creates the context from an already-answered wizard. Everything is validated
+// before anything is written, and the context is assembled in a temp directory
+// then renamed into place, so a failure never leaves a half-context behind.
+export async function createLite({ name, knowledgeFolder, profile }) {
+  const cleanName = normalizeName(name);
+  const profileText = normalizeProfile(profile);
 
   const folder = path.resolve((knowledgeFolder ?? "").trim());
   if ((knowledgeFolder ?? "").trim().length === 0) {
@@ -146,17 +199,9 @@ export async function createLite({ name, knowledgeFolder, profile }) {
     );
   }
 
-  const existing = await listLite();
-  if (existing.some((context) => context.name.toLowerCase() === cleanName.toLowerCase())) {
-    throw new LiteContextError(
-      `A lite context named "${cleanName}" already exists. Pick another name, or delete ` +
-        "that one with `/neatcontext:delete`."
-    );
-  }
+  await ensureUniqueName(cleanName);
 
-  const suffix = randomBytes(2).toString("hex");
-  const directory = path.join(liteHome(), `${slugify(cleanName)}-${suffix}`);
-  const staging = path.join(liteHome(), `.staging-${suffix}`);
+  const { suffix, directory, staging } = contextPaths(cleanName);
   const record = {
     schema: SCHEMA,
     id: `${LITE_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
@@ -165,12 +210,6 @@ export async function createLite({ name, knowledgeFolder, profile }) {
     createdAt: new Date().toISOString(),
     knowledgeFolder: folder
   };
-
-  // What actually lands on disk, which is not what the caller passed: it is
-  // trimmed and given exactly one terminating newline. Anything that later
-  // compares the profile against itself — a routing description remembering
-  // what it was derived from — has to hash this, not the input.
-  const profileText = `${cleanProfile}\n`;
 
   await mkdir(staging, { recursive: true });
   try {
@@ -193,8 +232,218 @@ export async function createLite({ name, knowledgeFolder, profile }) {
   };
 }
 
-// Removes the context's own two files. The knowledge folder is left alone —
-// it is the user's, and the plugin only ever held a path to it.
+function normalizeRoutingDescription(value) {
+  const description = (value ?? "").trim().replace(/\s+/g, " ");
+  if (description.length === 0) {
+    throw new LiteContextError(
+      "The routing description is empty. Say what future requests belong in this context."
+    );
+  }
+  if (description.length > MAX_ROUTING_DESCRIPTION) {
+    throw new LiteContextError(
+      `Keep the routing description under ${MAX_ROUTING_DESCRIPTION} characters.`
+    );
+  }
+  return description;
+}
+
+function normalizeCaptureKnowledge(knowledge) {
+  if (!Array.isArray(knowledge) || knowledge.length === 0) {
+    throw new LiteContextError(
+      "The capture has no knowledge files. Include at least knowledge/session-summary.md."
+    );
+  }
+  if (knowledge.length > MAX_CAPTURE_FILES) {
+    throw new LiteContextError(`Keep a conversation capture to ${MAX_CAPTURE_FILES} files or fewer.`);
+  }
+
+  const files = [];
+  const seen = new Set();
+  let totalBytes = 0;
+  for (const entry of knowledge) {
+    const portablePath =
+      typeof entry?.path === "string" ? entry.path.trim().replace(/\\/g, "/") : "";
+    const parts = portablePath.split("/");
+    if (
+      portablePath.length === 0 ||
+      portablePath.length > 180 ||
+      path.posix.isAbsolute(portablePath) ||
+      parts.length > MAX_LISTING_DEPTH + 1 ||
+      parts.some(
+        (part) =>
+          part.length === 0 ||
+          part.length > 100 ||
+          part === "." ||
+          part === ".." ||
+          /[<>:"|?*\u0000-\u001f]/.test(part) ||
+          /[. ]$/.test(part) ||
+          /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)
+      )
+    ) {
+      throw new LiteContextError(
+        `Invalid knowledge file path "${portablePath || "(empty)"}". Use a short relative path.`
+      );
+    }
+    if (!portablePath.toLowerCase().endsWith(".md")) {
+      throw new LiteContextError(
+        `Knowledge file "${portablePath}" must be Markdown (a .md file).`
+      );
+    }
+    const key = portablePath.toLowerCase();
+    if (seen.has(key)) {
+      throw new LiteContextError(`Knowledge file "${portablePath}" appears more than once.`);
+    }
+    if ([...seen].some((other) => key.startsWith(`${other}/`) || other.startsWith(`${key}/`))) {
+      throw new LiteContextError(`Knowledge file "${portablePath}" conflicts with another path.`);
+    }
+    seen.add(key);
+
+    const content = typeof entry?.content === "string" ? entry.content.trim() : "";
+    if (content.length === 0) {
+      throw new LiteContextError(`Knowledge file "${portablePath}" is empty.`);
+    }
+    const text = `${content}\n`;
+    const bytes = Buffer.byteLength(text, "utf8");
+    if (bytes > MAX_CAPTURE_FILE_BYTES) {
+      throw new LiteContextError(`Knowledge file "${portablePath}" is larger than 256 KB.`);
+    }
+    totalBytes += bytes;
+    if (totalBytes > MAX_CAPTURE_TOTAL_BYTES) {
+      throw new LiteContextError("Keep the generated knowledge bundle under 1 MB.");
+    }
+    files.push({ path: portablePath, text });
+  }
+
+  if (!seen.has("session-summary.md")) {
+    throw new LiteContextError(
+      "The capture must include session-summary.md so a future session has an entry point."
+    );
+  }
+  return files;
+}
+
+// Saves work already present in Claude's conversation. Unlike `createLite`,
+// this owns the knowledge it writes. Relative storage is the portability
+// contract: copying this one directory to another machine keeps every pointer
+// valid without exposing or repairing an absolute path from the creator.
+export async function createCapturedLite({
+  name,
+  profile,
+  routingDescription,
+  knowledge
+}) {
+  const cleanName = normalizeName(name);
+  const profileText = normalizeProfile(profile);
+  const useWhen = normalizeRoutingDescription(routingDescription);
+  const files = normalizeCaptureKnowledge(knowledge);
+  await ensureUniqueName(cleanName);
+
+  const { suffix, directory, staging } = contextPaths(cleanName);
+  const record = {
+    schema: SCHEMA,
+    id: `${LITE_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
+    name: cleanName,
+    kind: "lite",
+    createdAt: new Date().toISOString(),
+    knowledgeFolder: "knowledge",
+    knowledgeManaged: true,
+    capturedFrom: "claude-code-conversation",
+    routingDescription: useWhen
+  };
+
+  try {
+    await mkdir(path.join(staging, "knowledge"), { recursive: true });
+    await writeFile(path.join(staging, "profile.md"), profileText, "utf8");
+    for (const file of files) {
+      const target = path.join(staging, "knowledge", ...file.path.split("/"));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, file.text, "utf8");
+    }
+    await writeFile(
+      path.join(staging, "context.json"),
+      `${JSON.stringify(record, null, 2)}\n`,
+      "utf8"
+    );
+    await rename(staging, directory);
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+
+  return {
+    record: recordFor(directory, record),
+    profileText,
+    routingDescription: useWhen,
+    knowledgeFileCount: files.length
+  };
+}
+
+// A captured context is already an export bundle. Import reads only the
+// portable, generated shape and creates a fresh local id, so a teammate can
+// keep the shared folder unchanged and can rename the local copy if necessary.
+export async function importCapturedLite({ bundleFolder, name }) {
+  const supplied = (bundleFolder ?? "").trim();
+  if (supplied.length === 0) {
+    throw new LiteContextError("A captured context bundle folder is required.");
+  }
+  const source = path.resolve(supplied);
+  if (!(await directoryExists(source))) {
+    throw new LiteContextError(`No captured context bundle at ${source}.`);
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(path.join(source, "context.json"), "utf8"));
+  } catch {
+    throw new LiteContextError(`Could not read a valid context.json from ${source}.`);
+  }
+  if (
+    manifest?.schema !== SCHEMA ||
+    manifest.kind !== "lite" ||
+    manifest.knowledgeManaged !== true ||
+    manifest.knowledgeFolder !== "knowledge" ||
+    manifest.capturedFrom !== "claude-code-conversation"
+  ) {
+    throw new LiteContextError(
+      "That folder is not a portable conversation context created by `/neatcontext:save`."
+    );
+  }
+
+  let profile;
+  try {
+    profile = await readFile(path.join(source, "profile.md"), "utf8");
+  } catch {
+    throw new LiteContextError("The captured context bundle has no readable profile.md.");
+  }
+
+  const knowledgeFolder = path.join(source, "knowledge");
+  const { files, truncated } = await listKnowledgeFiles(knowledgeFolder, {
+    limit: MAX_CAPTURE_FILES + 1
+  });
+  if (truncated || files.length > MAX_CAPTURE_FILES) {
+    throw new LiteContextError(
+      `The captured context bundle has more than ${MAX_CAPTURE_FILES} knowledge files.`
+    );
+  }
+  const knowledge = [];
+  for (const file of files) {
+    knowledge.push({
+      path: file,
+      content: await readFile(path.join(knowledgeFolder, ...file.split("/")), "utf8")
+    });
+  }
+
+  return createCapturedLite({
+    name: typeof name === "string" && name.trim().length > 0 ? name : manifest.name,
+    profile,
+    routingDescription: manifest.routingDescription,
+    knowledge
+  });
+}
+
+// Removes the context directory. A `/create` context only points at the user's
+// knowledge folder, so that folder is left alone. A `/save` context owns its
+// generated knowledge inside this directory, so it is removed with the bundle.
 export async function deleteLite(id) {
   const record = await readLite(id);
   if (!record) {

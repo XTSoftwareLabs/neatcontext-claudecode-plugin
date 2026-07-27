@@ -1,7 +1,7 @@
 {
   "name": "neatcontext-claudecode-plugin",
-  "version": "0.1.0",
-  "description": "Claude Code plugin to select a NeatContext context and ground answers in it.",
+  "version": "0.2.0",
+  "description": "Claude Code plugin to save conversations as reusable contexts and ground later sessions in them.",
   "type": "module",
   "private": true,
   "license": "MIT",

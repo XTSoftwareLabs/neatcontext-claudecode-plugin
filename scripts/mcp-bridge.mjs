@@ -50,7 +50,7 @@ import {
 } from "./routing.mjs";
 import { applySelection, listAllContexts, resolveContext } from "./selection.mjs";
 
-const SERVER_INFO = { name: "neatcontext", version: "0.1.0" };
+const SERVER_INFO = { name: "neatcontext", version: "0.2.0" };
 const GET_CONTEXT_TOOL = {
   name: "get_context",
   title: "Get Context",
@@ -356,8 +356,9 @@ function toolText(id, text, isError = false) {
 async function previewContext(id, target) {
   const state = await readRouting();
   const card = state.cards[target.id];
+  const useWhen = card?.useWhen || target.routingDescription;
   const lines = [`# ${target.name} (${target.kind})`, ""];
-  lines.push(card?.useWhen ? card.useWhen : "No routing description has been derived for it yet.");
+  lines.push(useWhen || "No routing description has been derived for it yet.");
   if (card?.aliases?.length > 0) {
     lines.push("", `Also called: ${card.aliases.join(", ")}`);
   }

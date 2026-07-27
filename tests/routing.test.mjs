@@ -1065,7 +1065,7 @@ describe("the command surface", () => {
   it("names every subcommand it has when given one it does not", async () => {
     assert.match(
       await cli("frobnicate"),
-      /Use: status \| list \| use \| create \| delete \| mode \| alias \| describe/
+      /Use: status \| list \| use \| create \| save \| import \| delete \| mode \| alias \| describe/
     );
   });
 });

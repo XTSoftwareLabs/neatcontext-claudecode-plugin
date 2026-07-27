@@ -16,3 +16,7 @@ If it says the routing description was derived from an older version of the
 profile, offer to refresh it: read the profile, write a fresh one-line scope
 description the same way `/neatcontext:use` does, and record it with
 `neatcontext-cli.mjs describe "<name>" --use-when "<line>"`.
+
+Keep `/neatcontext:create` and `/neatcontext:save` distinct when suggesting a
+next step: create starts a fresh context from user answers; save distills useful
+work already in the current conversation.

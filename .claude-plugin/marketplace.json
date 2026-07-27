@@ -1,5 +1,6 @@
 {
   "name": "neatcontext",
+  "description": "Save Claude Code work as reusable contexts and reconnect the right knowledge in later sessions.",
   "owner": {
     "name": "XTSoftwareLabs",
     "url": "https://github.com/XTSoftwareLabs"
@@ -8,7 +9,7 @@
     {
       "name": "neatcontext",
       "source": "./",
-      "description": "Ground every answer in a context: create a lite one in Claude Code, or connect a standard one from NeatContext desktop."
+      "description": "Save conversations as reusable lite contexts, create fresh ones, or connect standard contexts from NeatContext desktop."
     }
   ]
 }

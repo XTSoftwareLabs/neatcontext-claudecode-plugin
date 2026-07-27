@@ -1,7 +1,7 @@
 {
   "name": "neatcontext",
-  "version": "0.1.0",
-  "description": "Ground every answer in a context: create a lite one in Claude Code, or connect a standard one from NeatContext desktop.",
+  "version": "0.2.0",
+  "description": "Save Claude Code conversations as reusable lite contexts, create fresh ones, or connect standard contexts from NeatContext desktop.",
   "author": {
     "name": "XTSoftwareLabs"
   },
