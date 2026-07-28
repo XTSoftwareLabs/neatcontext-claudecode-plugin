@@ -1,6 +1,6 @@
 {
   "name": "neatcontext",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Save Codex work as reusable, domain-aware context",
   "author": {
     "name": "XTSoftwareLabs",
