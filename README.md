@@ -93,9 +93,9 @@ This is the useful work you may want to save. Run `/neatcontext:save event-parti
 
 ```text
 Claude:
-Lite context folder: <folder>
-Profile path: <folder>/profile.md
-Knowledge folder: <folder>/knowledge
+Lite context folder: C:\Users\alex\.claude\neatcontext\event-partition-investigation
+Profile path: C:\Users\alex\.claude\neatcontext\event-partition-investigation/profile.md
+Knowledge folder: C:\Users\alex\.claude\neatcontext\event-partition-investigation/knowledge
 Use command: /neatcontext:use event-partition-investigation
 ```
 
