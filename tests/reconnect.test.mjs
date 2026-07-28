@@ -50,6 +50,7 @@ beforeEach(async () => {
   companion.state.lastRuntimeContext = null;
   companion.state.version = 0;
   companion.state.puts = 0;
+  companion.state.refuseDisconnect = false;
   await rm(path.join(companion.directory, "plugin-selection.json"), { force: true });
   await rm(path.join(companion.directory, "plugin-routing.json"), { force: true });
 });
@@ -200,6 +201,42 @@ describe("a session keeps its context when NeatContext restarts", () => {
     companion.restart();
 
     assert.match(await cli("list"), /Standard contexts.*\n.*payment team\s+\(connected\)/);
+  });
+});
+
+describe("disconnecting the current context", () => {
+  it("removes the live connection and prevents it from being restored", async () => {
+    const session = openSession();
+    try {
+      await session.handshake();
+      await cli("use", "payment", "team");
+      assert.match(contextText(await session.getContext()), /Connected context: payment team/);
+
+      assert.match(
+        await cli("disconnect"),
+        /Disconnected the "payment team" context from this session/
+      );
+      assert.match(contextText(await session.getContext()), /No NeatContext Context is connected/);
+      assert.deepEqual(await session.contextToolNames(), ["get_context"]);
+
+      companion.restart();
+      assert.match(contextText(await session.getContext()), /No NeatContext Context is connected/);
+      assert.equal(companion.state.puts, 1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("is idempotent when no context is connected", async () => {
+    assert.equal(await cli("disconnect"), "No context is connected to this session.");
+  });
+
+  it("keeps the connection when the companion refuses to disconnect it", async () => {
+    await cli("use", "payment", "team");
+    companion.state.refuseDisconnect = true;
+
+    assert.equal(await cli("disconnect"), "Could not disconnect the context. Try again.");
+    assert.match(await cli("status"), /Connected context: payment team/);
   });
 });
 

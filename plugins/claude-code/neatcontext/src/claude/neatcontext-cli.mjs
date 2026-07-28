@@ -4,6 +4,7 @@
 //   status                     show the connected context
 //   list [--lite]              list contexts (standard from the app, plus lite)
 //   use [query]                connect by number, exact name, or unique substring
+//   disconnect                 disconnect the context from this session
 //   create --name --knowledge  create a lite context (--profile-from <file>)
 //   save-target [name]          decide whether save creates or updates
 //   save --from <capture.json>  create or update from this conversation
@@ -44,7 +45,12 @@ import {
   sessionId,
   setMode
 } from "../core/routing.mjs";
-import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
+import {
+  applySelection,
+  disconnectSelection,
+  listAllContexts,
+  resolveContext
+} from "../core/selection.mjs";
 
 const UPGRADE_NOTE =
   "A lite context holds one domain profile, one primary knowledge folder, and saved " +
@@ -453,6 +459,24 @@ async function commandUse(state, query) {
   print(`Could not connect "${target.name}". Try again from the app.`);
 }
 
+async function commandDisconnect(state) {
+  const connected = state.connected;
+  const remembered = state.selection;
+  if (!connected && !remembered) {
+    print("No context is connected to this session.");
+    return;
+  }
+
+  const result = await disconnectSelection(state.client);
+  if (!result.ok) {
+    print("Could not disconnect the context. Try again.");
+    return;
+  }
+
+  const name = connected?.name ?? remembered.contextName;
+  print(`Disconnected the "${name}" context from this session.`);
+}
+
 // A context with no routing description can only be routed to by name, which is
 // what makes a standard context — whose profile the plugin cannot read until it
 // is connected — much worse at routing than a lite one. Connecting is the
@@ -833,6 +857,10 @@ async function run() {
     await commandUse(state, query);
     return;
   }
+  if (command === "disconnect") {
+    await commandDisconnect(state);
+    return;
+  }
   if (command === "delete") {
     await commandDelete(state, query, flags);
     return;
@@ -847,7 +875,7 @@ async function run() {
   }
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | create | save | import | delete | mode | alias | describe."
+      "Use: status | list | use | disconnect | create | save | import | delete | mode | alias | describe."
   );
 }
 

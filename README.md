@@ -152,6 +152,11 @@ Connect a context to the current session.
 Run the command without a name to see the available choices. Each Claude Code
 window keeps its own connected context.
 
+### `/neatcontext:disconnect`
+
+Disconnect the context from the current session. Other Claude Code windows keep
+their own connections, and the context itself is not deleted.
+
 ### `/neatcontext:list`
 
 List all contexts you can connect.

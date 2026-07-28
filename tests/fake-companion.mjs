@@ -76,6 +76,8 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
     // Makes the app refuse to connect a context it is perfectly willing to
     // list — a workspace that has been closed underneath it, say.
     refuseConnect: false,
+    // Makes the app refuse to disconnect the current session.
+    refuseDisconnect: false,
     // Every `x-neatcontext-session` seen, in order. A real NeatContext keys its
     // connections by this; the plugin has to actually send it.
     sessionHeaders: [],
@@ -129,6 +131,7 @@ export async function startFakeCompanion({ contexts, token = "test-token" } = {}
           return send(200, { contextId: context.id, contextName: context.name });
         }
         if (method === "DELETE") {
+          if (state.refuseDisconnect) return send(409, { error: "unavailable" });
           state.connected = null;
           state.bySession.delete(session);
           state.version += 1;

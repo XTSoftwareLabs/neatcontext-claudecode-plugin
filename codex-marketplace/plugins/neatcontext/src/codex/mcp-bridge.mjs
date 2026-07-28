@@ -89,7 +89,7 @@ const NOTHING_CONNECTED =
 // So this rides on both channels a session reads, and says which one wins.
 const CONNECTION_RULE = `## Connecting a context, in Codex
 
-Contexts are connected from this thread and nowhere else: the \`use_context\` tool, or \`$neatcontext:use <name>\` run by the user. \`$neatcontext:create\` makes a new local one from here.
+Contexts are connected from this thread and nowhere else: the \`use_context\` tool, or \`$neatcontext:use <name>\` run by the user. \`$neatcontext:disconnect\` disconnects the current one from this thread. \`$neatcontext:create\` makes a new local one from here.
 
 Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
