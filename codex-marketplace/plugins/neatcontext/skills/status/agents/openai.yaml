@@ -1,0 +1,7 @@
+interface:
+  display_name: "Context Status"
+  short_description: "Show this thread context connection"
+  default_prompt: "Use $neatcontext:status to show the context connected to this thread."
+
+policy:
+  allow_implicit_invocation: true

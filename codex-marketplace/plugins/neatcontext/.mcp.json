@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "neatcontext": {
+      "command": "node",
+      "args": [
+        "./src/codex/mcp-bridge.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Use Context"
+  short_description: "Connect a context to this Codex thread"
+  default_prompt: "Use $neatcontext:use to connect the right context to this thread."
+
+policy:
+  allow_implicit_invocation: false

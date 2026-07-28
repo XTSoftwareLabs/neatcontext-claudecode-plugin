@@ -1,0 +1,7 @@
+interface:
+  display_name: "Routing Mode"
+  short_description: "Set automatic context routing behavior"
+  default_prompt: "Use $neatcontext:mode to choose auto, ask, or manual context routing."
+
+policy:
+  allow_implicit_invocation: false
