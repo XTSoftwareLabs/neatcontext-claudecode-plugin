@@ -155,7 +155,7 @@ const ROUTING_TOOLS = new Map([
 // Anything that varies per context belongs in get_context instead, which is
 // re-read on every call and refreshed live by tools/list_changed. These
 // instructions do one job: get get_context called at the right moments.
-const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and one local knowledge folder, stored on this machine.
+const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and local knowledge stored on this machine.
 
 Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
 

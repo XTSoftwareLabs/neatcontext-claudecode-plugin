@@ -30,8 +30,9 @@ The plugin handles information only when needed to provide its features:
   context names, and portable context manifests that you create, save, or
   import.
 - **Conversation captures:** selected information from the active Claude Code
-  conversation when you invoke `/neatcontext:save`. The command instructs
-  Claude to create a focused capture rather than storing the entire transcript.
+  conversation when you invoke `/neatcontext:save`, whether creating a context
+  or updating one. The command instructs Claude to create a focused capture
+  rather than storing the entire transcript.
 - **Linked files:** paths and readable content from knowledge folders you
   explicitly connect to a lite context.
 - **Operational state:** context identifiers and names, the selected context
@@ -49,8 +50,9 @@ information, advertising identifiers, or precise location information.
 
 By default, the plugin stores or reads data in these locations:
 
-- `~/.neatcontext/lite/` for lite contexts, profiles, manifests, and managed
-  knowledge.
+- `~/.neatcontext/lite/` for lite contexts, profiles, manifests, managed
+  knowledge, and conversation additions saved into contexts that link external
+  knowledge folders.
 - `~/.neatcontext/plugin-selection.json` and
   `~/.neatcontext/plugin-sessions/` for context selections.
 - `~/.neatcontext/plugin-routing.json` for routing metadata and a bounded
@@ -97,8 +99,8 @@ behavioral advertising.
 Local data remains until you remove it or a plugin operation removes it:
 
 - `/neatcontext:delete` asks for confirmation before deleting a lite context.
-- Deleting a saved context also deletes the generated knowledge owned by that
-  context.
+- Deleting a lite context also deletes the generated conversation knowledge
+  stored inside its local bundle.
 - Deleting a context created from an external knowledge folder does not delete
   that external folder.
 - Standard contexts are managed and deleted in the NeatContext desktop app.

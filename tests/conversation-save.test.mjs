@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -105,6 +105,46 @@ async function saveCapture(capture = validCapture(), { consume = false } = {}) {
 
 function bundleFrom(output) {
   return /Lite context folder:\s+(.+)/.exec(output)?.[1];
+}
+
+function outputField(output, label) {
+  return new RegExp(`^${label}: (.+)$`, "m").exec(output)?.[1];
+}
+
+function updateCaptureFrom(target, overrides = {}) {
+  return validCapture({
+    name: outputField(target, "Context name"),
+    targetId: outputField(target, "Context id"),
+    baseHash: outputField(target, "Base hash"),
+    ...overrides
+  });
+}
+
+async function createLinkedContext(name = "Linked Runbooks") {
+  const folder = path.join(home, `linked-${serial++}`);
+  const profileFile = path.join(home, `linked-profile-${serial++}.md`);
+  await mkdir(folder, { recursive: true });
+  await writeFile(path.join(folder, "runbook.md"), "# Existing runbook\n\nRestart the worker.\n");
+  await writeFile(
+    profileFile,
+    `# ${name}\n\n## Purpose\nUse the linked runbooks.\n\n` +
+      "## What to do\nFollow verified procedures.\n\n" +
+      "## What to avoid\nDo not guess.\n\n" +
+      "## Behavior\nCite the runbook."
+  );
+  const output = await cli(
+    "create",
+    "--name",
+    name,
+    "--knowledge",
+    folder,
+    "--profile-from",
+    profileFile,
+    "--use-when",
+    "worker restarts and linked runbooks"
+  );
+  await rm(profileFile, { force: true });
+  return { folder, output };
 }
 
 function openSession() {
@@ -253,6 +293,203 @@ describe("saving the current conversation", () => {
     await rm(path.join(home, "plugin-routing.json"), { recursive: true, force: true });
     assert.doesNotMatch(await cli("use", "Conversation Capture"), /no routing description yet/);
   });
+
+  it("uses Save and Save As semantics when resolving the destination", async () => {
+    assert.match(await cli("save-target"), /Save action: create/);
+    assert.match(await cli("save-target", "Fresh Context"), /Save action: create/);
+
+    await saveCapture();
+    assert.match(await cli("save-target"), /Save action: create/);
+    assert.match(await cli("save-target", "conversation capture"), /Save action: update/);
+    assert.match(await cli("save-target", "Conversation"), /Save action: choose/);
+    assert.match(await cli("save-target", "Conversaton Capture"), /Save action: choose/);
+    assert.match(await cli("save-target", "xy"), /Save action: create/);
+
+    await cli("use", "Conversation Capture");
+    const current = await cli("save-target");
+    assert.match(current, /Save action: update/);
+    assert.match(current, /Context name: Conversation Capture/);
+  });
+
+  it("previews and confirms an in-place update without changing the connection", async () => {
+    const { output } = await saveCapture();
+    const bundle = bundleFrom(output);
+    const beforeManifest = JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8"));
+    await cli("use", "Conversation Capture");
+    await cli("alias", "Conversation Capture", "--called", "checkout recovery");
+    const session = openSession();
+    try {
+      await session.handshake();
+      const before = await session.send("tools/call", {
+        name: "get_context",
+        arguments: {}
+      });
+      assert.match(before.result.content[0].text, /implementation\/decisions\.md/);
+
+      const target = await cli("save-target");
+      const capture = updateCaptureFrom(target, {
+        profile:
+          "# Conversation Capture\n\n## Purpose\nPreserve checkout recovery and deployment work.\n\n" +
+          "## What to do\nUse the recorded decisions.\n\n" +
+          "## What to avoid\nDo not invent deployment state.\n\n" +
+          "## Behavior\nSeparate verified facts from open work.",
+        routingDescription: "Checkout recovery, payment retries, deployments, and PAY-* tickets",
+        knowledge: [
+          {
+            path: "session-summary.md",
+            content: "# Session summary\n\nRetry backoff is deployed and verified."
+          },
+          {
+            path: "runbook.md",
+            content: "# Runbook\n\nCheck provider health before restarting workers."
+          }
+        ]
+      });
+      const file = await writeCapture(capture);
+
+      const preview = await cli("save", "--from", file);
+      assert.match(preview, /Update the "Conversation Capture" lite context/);
+      assert.match(preview, /1 added, 1 updated, 1 removed/);
+      assert.match(preview, /Re-run this save with --yes to confirm/);
+      assert.equal(
+        await readFile(path.join(bundle, "knowledge", "implementation", "decisions.md"), "utf8"),
+        `${validCapture().knowledge[1].content}\n`
+      );
+
+      const updated = await cli("save", "--from", file, "--yes", "--consume");
+      assert.match(updated, /Updated context: Conversation Capture/);
+      assert.equal(bundleFrom(updated), bundle);
+      await assert.rejects(readFile(file, "utf8"), { code: "ENOENT" });
+      await assert.rejects(
+        readFile(path.join(bundle, "knowledge", "implementation", "decisions.md"), "utf8"),
+        { code: "ENOENT" }
+      );
+      assert.match(await readFile(path.join(bundle, "knowledge", "runbook.md"), "utf8"), /provider health/);
+
+      const afterManifest = JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8"));
+      assert.equal(afterManifest.id, beforeManifest.id);
+      assert.equal(afterManifest.createdAt, beforeManifest.createdAt);
+      assert.equal(afterManifest.revision, 2);
+      assert.ok(afterManifest.updatedAt > beforeManifest.updatedAt);
+      const routing = JSON.parse(await readFile(path.join(home, "plugin-routing.json"), "utf8"));
+      assert.deepEqual(routing.cards[beforeManifest.id].aliases, ["checkout recovery"]);
+      assert.match(await cli("status"), /Connected context: Conversation Capture \(lite\)/);
+
+      const after = await session.send("tools/call", {
+        name: "get_context",
+        arguments: {}
+      });
+      assert.match(after.result.content[0].text, /runbook\.md/);
+      assert.doesNotMatch(after.result.content[0].text, /implementation\/decisions\.md/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("updates a /create context while leaving its linked knowledge untouched", async () => {
+    const { folder } = await createLinkedContext();
+    const target = await cli("save-target", "Linked Runbooks");
+    assert.match(target, /Save action: update/);
+    assert.match(target, /linked folder is read-only/);
+
+    const file = await writeCapture(
+      updateCaptureFrom(target, {
+        name: "Linked Runbooks",
+        profile:
+          "# Linked Runbooks\n\n## Purpose\nUse the linked runbooks and captured findings.\n\n" +
+          "## What to do\nFollow verified procedures.\n\n" +
+          "## What to avoid\nDo not guess.\n\n" +
+          "## Behavior\nCite the runbook.",
+        routingDescription: "worker restarts, linked runbooks, and retry findings",
+        knowledge: [
+          {
+            path: "session-summary.md",
+            content: "# Session summary\n\nThe worker also needs its retry queue drained."
+          }
+        ]
+      })
+    );
+
+    const preview = await cli("save", "--from", file);
+    assert.match(preview, /Linked knowledge folder will not be modified/);
+    const updated = await cli("save", "--from", file, "--yes");
+    const generated = outputField(updated, "Conversation knowledge folder");
+    assert.equal(await readFile(path.join(folder, "runbook.md"), "utf8"), "# Existing runbook\n\nRestart the worker.\n");
+    assert.match(await readFile(path.join(generated, "session-summary.md"), "utf8"), /retry queue/);
+
+    await cli("use", "Linked Runbooks");
+    assert.match(await cli("status"), /Conversation knowledge: .* \(1 files\)/);
+    const session = openSession();
+    try {
+      await session.handshake();
+      const context = await session.send("tools/call", {
+        name: "get_context",
+        arguments: {}
+      });
+      assert.match(context.result.content[0].text, /Conversation knowledge saved into this context/);
+      assert.match(context.result.content[0].text, /session-summary\.md/);
+      assert.match(context.result.content[0].text, /runbook\.md/);
+    } finally {
+      await session.close();
+    }
+    const deleted = await cli("delete", "Linked Runbooks", "--yes");
+    assert.match(deleted, /knowledge folder .* was left untouched/s);
+    assert.equal(
+      await readFile(path.join(folder, "runbook.md"), "utf8"),
+      "# Existing runbook\n\nRestart the worker.\n"
+    );
+    await assert.rejects(readFile(path.join(generated, "session-summary.md"), "utf8"), {
+      code: "ENOENT"
+    });
+  });
+
+  it("refuses to overwrite a context changed after the update was drafted", async () => {
+    await saveCapture();
+    const target = await cli("save-target", "Conversation Capture");
+    const file = await writeCapture(
+      updateCaptureFrom(target, {
+        knowledge: [
+          {
+            path: "session-summary.md",
+            content: "# Session summary\n\nA newer proposed summary."
+          }
+        ]
+      })
+    );
+    await writeFile(outputField(target, "Profile path"), "# Hand-edited profile\n");
+
+    assert.match(
+      await cli("save", "--from", file, "--yes", "--consume"),
+      /changed while this update was being prepared/
+    );
+    assert.equal(JSON.parse(await readFile(file, "utf8")).targetId, outputField(target, "Context id"));
+    assert.equal(await readFile(outputField(target, "Profile path"), "utf8"), "# Hand-edited profile\n");
+  });
+
+  it("does not recreate a connected lite context that disappeared", async () => {
+    const { output } = await saveCapture();
+    await cli("use", "Conversation Capture");
+    await rm(bundleFrom(output), { recursive: true, force: true });
+
+    assert.match(await cli("save-target"), /connected lite context .* no longer exists/s);
+    assert.match(
+      await cli("save-target", "Conversation Capture"),
+      /lite context "Conversation Capture" no longer exists/
+    );
+  });
+
+  it("reports a no-op update without asking for confirmation", async () => {
+    await saveCapture();
+    const target = await cli("save-target", "Conversation Capture");
+    const capture = updateCaptureFrom(target);
+    const file = await writeCapture(capture);
+
+    assert.match(await cli("save", "--from", file), /does not change the "Conversation Capture"/);
+    const { updateCapturedLite } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
+    await assert.rejects(() => updateCapturedLite(capture), /does not change/);
+  });
 });
 
 describe("capture validation", () => {
@@ -384,6 +621,86 @@ describe("capture validation", () => {
     );
     assert.match(await cli("list", "--lite"), /Legacy Lite/);
   });
+
+  it("validates update identity and limits before writing", async () => {
+    const { fingerprintLite, listLite, previewCapturedLiteUpdate } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
+    const { output } = await saveCapture();
+    const target = await cli("save-target", "Conversation Capture");
+    const capture = updateCaptureFrom(target, {
+      knowledge: [{ path: "session-summary.md", content: "# Session summary\n\nChanged." }]
+    });
+
+    await assert.rejects(
+      () => previewCapturedLiteUpdate({ ...capture, targetId: "lite:not-there" }),
+      /no longer exists/
+    );
+    await assert.rejects(
+      () => previewCapturedLiteUpdate({ ...capture, name: "Wrong Context" }),
+      /prepared for "Wrong Context"/
+    );
+    await assert.rejects(
+      () => previewCapturedLiteUpdate({ ...capture, baseHash: "" }),
+      /no base hash/
+    );
+
+    const bundle = bundleFrom(output);
+    for (let index = 0; index < 23; index += 1) {
+      await writeFile(path.join(bundle, "knowledge", `extra-${index}.md`), "extra");
+    }
+    const oversized = (await listLite())[0];
+    await assert.rejects(() => fingerprintLite(oversized), /too many generated/);
+  });
+
+  it("serializes concurrent updates and rolls a failed directory swap back", async () => {
+    const {
+      fingerprintLite,
+      listLite,
+      replaceLiteDirectory,
+      updateCapturedLite
+    } = await import("../plugins/claude-code/neatcontext/src/core/lite-context.mjs");
+    await saveCapture();
+    const record = (await listLite())[0];
+    const capture = validCapture({
+      targetId: record.id,
+      baseHash: await fingerprintLite(record),
+      knowledge: [{ path: "session-summary.md", content: "# Session summary\n\nConcurrent." }]
+    });
+    const results = await Promise.allSettled([
+      updateCapturedLite(capture),
+      updateCapturedLite(capture)
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    const rejected = results.find((result) => result.status === "rejected");
+    assert.match(rejected.reason.message, /already being updated|changed while/);
+
+    const latest = (await listLite())[0];
+    const staleLock = path.join(
+      home,
+      "lite",
+      `.update-${latest.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.lock`
+    );
+    await mkdir(staleLock);
+    await utimes(staleLock, new Date(0), new Date(0));
+    await updateCapturedLite(
+      validCapture({
+        targetId: latest.id,
+        baseHash: await fingerprintLite(latest),
+        knowledge: [
+          { path: "session-summary.md", content: "# Session summary\n\nRecovered stale lock." }
+        ]
+      })
+    );
+
+    const current = path.join(home, "swap-current");
+    const missingStaging = path.join(home, "swap-missing");
+    const backup = path.join(home, "swap-backup");
+    await mkdir(current);
+    await writeFile(path.join(current, "marker.txt"), "original");
+    await assert.rejects(() => replaceLiteDirectory(current, missingStaging, backup));
+    assert.equal(await readFile(path.join(current, "marker.txt"), "utf8"), "original");
+  });
 });
 
 describe("sharing a captured context", () => {
@@ -489,7 +806,7 @@ describe("sharing a captured context", () => {
 });
 
 describe("the Claude-facing save workflow", () => {
-  it("keeps fresh creation separate and defines a privacy-aware model capture", async () => {
+  it("defines a privacy-aware Save and Save As workflow", async () => {
     const root = path.resolve(claude, "..", "..");
     const saveCommand = await readFile(path.join(root, "commands", "save.md"), "utf8");
     const createCommand = await readFile(path.join(root, "commands", "create.md"), "utf8");
@@ -499,8 +816,13 @@ describe("the Claude-facing save workflow", () => {
     assert.match(saveCommand, /model active in this session/);
     assert.match(saveCommand, /session-summary\.md/);
     assert.match(saveCommand, /Never write secret values/);
+    assert.match(saveCommand, /Save \/ Save As semantics/);
+    assert.match(saveCommand, /save-target/);
+    assert.match(saveCommand, /Relay that preview and ask the user to confirm/);
+    assert.match(saveCommand, /--yes --consume/);
+    assert.match(saveCommand, /linked knowledge folder is\s+read-only/);
     assert.match(saveCommand, /save --from .* --consume/);
-    assert.match(saveCommand, /Do not connect the new context\s+automatically/);
+    assert.match(saveCommand, /Do not connect a new or named context\s+automatically/);
     assert.match(createCommand, /fresh context/);
     assert.match(createCommand, /\/neatcontext:save/);
     assert.match(importCommand, /source bundle is read-only/);

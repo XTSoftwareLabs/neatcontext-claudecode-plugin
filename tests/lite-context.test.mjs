@@ -527,6 +527,21 @@ describe("lite and standard side by side", () => {
     assert.doesNotMatch(listed, /\(lite\)/);
   });
 
+  it("does not overwrite or shadow a standard context through save", async () => {
+    assert.match(
+      await cli("save-target", "payment team"),
+      /standard context and cannot be updated by this plugin/
+    );
+    await cli("use", "payment team");
+    assert.match(
+      await cli("save-target"),
+      /standard context and cannot be updated by this plugin/
+    );
+
+    await createContext("payment team");
+    assert.match(await cli("save-target", "payment team"), /More than one context is named/);
+  });
+
   it("numbers continuously across both sections, so `use <n>` still works", async () => {
     await createContext("Payments Runbooks");
     const listed = await cli("list");

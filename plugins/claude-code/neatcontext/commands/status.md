@@ -19,4 +19,4 @@ description the same way `/neatcontext:use` does, and record it with
 
 Keep `/neatcontext:create` and `/neatcontext:save` distinct when suggesting a
 next step: create starts a fresh context from user answers; save distills useful
-work already in the current conversation.
+work already in the current conversation into a new or existing lite context.
