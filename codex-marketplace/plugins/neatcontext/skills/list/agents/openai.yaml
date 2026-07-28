@@ -1,0 +1,7 @@
+interface:
+  display_name: "List Contexts"
+  short_description: "List contexts available to this thread"
+  default_prompt: "Use $neatcontext:list to show the contexts available to this thread."
+
+policy:
+  allow_implicit_invocation: true

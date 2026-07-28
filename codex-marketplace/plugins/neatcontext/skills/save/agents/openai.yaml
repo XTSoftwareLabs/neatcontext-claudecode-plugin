@@ -1,0 +1,7 @@
+interface:
+  display_name: "Save Conversation Context"
+  short_description: "Save durable work as reusable context"
+  default_prompt: "Use $neatcontext:save to preserve the durable work from this conversation."
+
+policy:
+  allow_implicit_invocation: false

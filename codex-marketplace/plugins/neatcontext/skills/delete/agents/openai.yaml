@@ -1,0 +1,7 @@
+interface:
+  display_name: "Delete Context"
+  short_description: "Delete a local lite context safely"
+  default_prompt: "Use $neatcontext:delete to delete a lite context after preview and confirmation."
+
+policy:
+  allow_implicit_invocation: false
