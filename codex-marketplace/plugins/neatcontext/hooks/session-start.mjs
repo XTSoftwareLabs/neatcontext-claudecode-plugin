@@ -42,7 +42,7 @@ const menu = renderMenu(menuEntries(contexts, state), {
 const guidance = [
   "NeatContext is installed for this Codex thread.",
   "For requests that depend on the user's domain, documents, tools, or team conventions, call `get_context` before answering and ground the answer in what it returns.",
-  "Connect or switch contexts inside this thread with `use_context` or the explicit `$neatcontext:use` skill. Do not tell the user to select a context in the desktop app.",
+  "Connect or switch contexts inside this thread with `use_context` or the explicit `$neatcontext:use` skill. Disconnect the current context with `$neatcontext:disconnect`. Do not tell the user to select a context in the desktop app.",
   menu,
   "Use `$neatcontext:save` to preserve durable work from the visible conversation. Never parse Codex transcript files for that workflow."
 ]

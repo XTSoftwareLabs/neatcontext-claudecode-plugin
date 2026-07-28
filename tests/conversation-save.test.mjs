@@ -831,7 +831,7 @@ describe("the Claude-facing save workflow", () => {
   it("advertises every command in the CLI help", async () => {
     assert.match(
       await cli("not-a-command"),
-      /status \| list \| use \| create \| save \| import \| delete/
+      /status \| list \| use \| disconnect \| create \| save \| import \| delete/
     );
   });
 

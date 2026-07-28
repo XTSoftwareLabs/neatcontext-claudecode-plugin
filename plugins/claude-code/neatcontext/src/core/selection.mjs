@@ -96,4 +96,20 @@ export async function applySelection(target, client) {
   return { ok: true, kind: "standard", name };
 }
 
+// Disconnects only the current host session. A reachable companion owns the
+// live standard-context connection, while the local selection is what restores
+// it after an app restart (and is the entire connection for lite contexts).
+// Clear the local record even if the companion disappears between discovery and
+// this request: retaining it would reconnect against the user's explicit intent.
+export async function disconnectSelection(client) {
+  if (client) {
+    const response = await client.disconnect().catch(() => null);
+    if (response && response.status !== 200 && response.status !== 204) {
+      return { ok: false, reason: "refused" };
+    }
+  }
+  await clearSelection();
+  return { ok: true };
+}
+
 export { clearSelection };

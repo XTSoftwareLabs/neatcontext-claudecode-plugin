@@ -96,7 +96,17 @@ test("marketplace and plugin manifests describe an isolated Codex package", asyn
 });
 
 test("all namespaced workflows are real skills without scaffold placeholders", async () => {
-  const expected = ["create", "delete", "import", "list", "mode", "save", "status", "use"];
+  const expected = [
+    "create",
+    "delete",
+    "disconnect",
+    "import",
+    "list",
+    "mode",
+    "save",
+    "status",
+    "use"
+  ];
   const actual = (await readdir(path.join(pluginRoot, "skills"), { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -133,6 +143,10 @@ test("Codex CLI isolates routing by CODEX_THREAD_ID", async () => {
 test("Codex saves conversation provenance without touching a transcript", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-save-"));
   const capturePath = path.join(home, "capture.json");
+  const env = {
+    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    CODEX_THREAD_ID: "save-thread"
+  };
   await writeFile(
     capturePath,
     JSON.stringify({
@@ -151,12 +165,7 @@ test("Codex saves conversation provenance without touching a transcript", async 
     "utf8"
   );
 
-  const result = await runNode(cli, ["save", "--from", capturePath, "--consume"], {
-    env: {
-      NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
-      CODEX_THREAD_ID: "save-thread"
-    }
-  });
+  const result = await runNode(cli, ["save", "--from", capturePath, "--consume"], { env });
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Use command: \$neatcontext:use Codex smoke context/);
 
@@ -167,6 +176,17 @@ test("Codex saves conversation provenance without touching a transcript", async 
   );
   assert.equal(manifest.schema, 1);
   assert.equal(manifest.capturedFrom, "codex-conversation");
+
+  const connected = await runNode(cli, ["use", "Codex smoke context"], { env });
+  assert.match(connected.stdout, /Connected the "Codex smoke context" lite context/);
+
+  const disconnected = await runNode(cli, ["disconnect"], { env });
+  assert.match(
+    disconnected.stdout,
+    /Disconnected the "Codex smoke context" context from this thread/
+  );
+  const status = await runNode(cli, ["status"], { env });
+  assert.match(status.stdout, /No context is connected yet/);
 });
 
 test("SessionStart hook emits thread-scoped routing guidance", async () => {

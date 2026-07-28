@@ -19,6 +19,7 @@ Start a new Codex thread after installation. Review and trust the plugin's
 
 - `$neatcontext:save`
 - `$neatcontext:use`
+- `$neatcontext:disconnect`
 - `$neatcontext:list`
 - `$neatcontext:status`
 - `$neatcontext:create`
