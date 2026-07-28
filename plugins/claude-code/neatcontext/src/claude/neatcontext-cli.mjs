@@ -5,7 +5,8 @@
 //   list [--lite]              list contexts (standard from the app, plus lite)
 //   use [query]                connect by number, exact name, or unique substring
 //   create --name --knowledge  create a lite context (--profile-from <file>)
-//   save --from <capture.json>  save this conversation as a portable lite context
+//   save-target [name]          decide whether save creates or updates
+//   save --from <capture.json>  create or update from this conversation
 //   import --from <bundle>      import a portable conversation context
 //   delete <query> [--yes]     delete a lite context
 //   mode [auto|ask|manual]     how the session may route itself between contexts
@@ -25,10 +26,13 @@ import {
   createCapturedLite,
   createLite,
   deleteLite,
+  fingerprintLite,
   importCapturedLite,
   LiteContextError,
   listKnowledgeFiles,
-  readProfileText
+  previewCapturedLiteUpdate,
+  readProfileText,
+  updateCapturedLite
 } from "../core/lite-context.mjs";
 import {
   addAlias,
@@ -43,8 +47,9 @@ import {
 import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
 
 const UPGRADE_NOTE =
-  "A lite context holds one domain profile and one knowledge folder. For multiple " +
-  "knowledge folders, extension tools (incidents, logs, deploys), and indexed " +
+  "A lite context holds one domain profile, one primary knowledge folder, and saved " +
+  "conversation notes. For multiple linked knowledge folders, extension tools " +
+  "(incidents, logs, deploys), and indexed " +
   "retrieval, create a standard context in the NeatContext desktop app.";
 
 function print(line = "") {
@@ -168,6 +173,7 @@ async function loadState() {
     contexts,
     lite,
     standard,
+    selection,
     connected,
     restoreFailed: appState?.restoreFailed === true
   };
@@ -210,6 +216,15 @@ async function commandStatus(state) {
           "or check the path is still valid."
       );
     }
+    if (!connected.record.knowledgeManaged && connected.record.conversationKnowledgeFolder) {
+      const generated = await listKnowledgeFiles(connected.record.conversationKnowledgeFolder);
+      if (generated.files.length > 0) {
+        print(
+          `  Conversation knowledge: ${connected.record.conversationKnowledgeFolder} ` +
+            `(${generated.files.length} files)`
+        );
+      }
+    }
     print("  Lite contexts have no extension tools.");
     reportMode();
     return;
@@ -238,6 +253,157 @@ async function commandStatus(state) {
 
 function commandList(state, { liteOnly }) {
   print(liteOnly ? formatLiteList(state) : formatList(state));
+}
+
+function saveNameKey(value) {
+  return value.trim().toLowerCase();
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    let diagonal = previous[0];
+    previous[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      const above = previous[column];
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + (left[row - 1] === right[column - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function similarSaveTargets(contexts, query) {
+  const wanted = saveNameKey(query).replace(/[^a-z0-9]+/g, "");
+  if (wanted.length < 3) {
+    return [];
+  }
+  return contexts.filter((context) => {
+    const candidate = saveNameKey(context.name).replace(/[^a-z0-9]+/g, "");
+    if (candidate.includes(wanted) || wanted.includes(candidate)) {
+      return true;
+    }
+    return (
+      editDistance(wanted, candidate) <=
+      Math.max(2, Math.floor(Math.max(wanted.length, candidate.length) * 0.2))
+    );
+  });
+}
+
+async function printUpdateTarget(target) {
+  const routing = await readRouting();
+  const useWhen = routing.cards[target.id]?.useWhen || target.routingDescription;
+  print("Save action: update");
+  print(`Context name: ${target.name}`);
+  print(`Context id: ${target.id}`);
+  print(`Base hash: ${await fingerprintLite(target)}`);
+  print(`Profile path: ${target.profilePath}`);
+  print(`Routing description: ${useWhen || "(none — derive one from the profile)"}`);
+  print(`Knowledge folder: ${target.knowledgeFolder}`);
+  if (target.knowledgeManaged) {
+    print(`Conversation knowledge folder: ${target.knowledgeFolder}`);
+    print("Knowledge ownership: managed by this lite context");
+  } else {
+    print(`Conversation knowledge folder: ${target.conversationKnowledgeFolder}`);
+    print(
+      "Knowledge ownership: linked folder is read-only; conversation updates are bundle-local"
+    );
+  }
+}
+
+// Save deliberately resolves names more strictly than `/use`: an exact,
+// case-insensitive name updates, while a genuinely new name creates. Partial
+// matching would turn "save as" into a surprising mutation.
+async function commandSaveTarget(state, query) {
+  if (query.length === 0) {
+    if (state.connected?.kind === "lite" && state.connected.record) {
+      await printUpdateTarget(state.connected.record);
+      return;
+    }
+    if (state.selection?.kind === "lite") {
+      print("Save action: unavailable");
+      print(
+        `The connected lite context "${state.selection.contextName}" no longer exists on disk.`
+      );
+      print("Connect another context or provide a new context name.");
+      return;
+    }
+    if (state.connected?.kind === "standard" || state.selection?.kind === "standard") {
+      const name = state.connected?.name ?? state.selection.contextName;
+      print("Save action: unavailable");
+      print(
+        `The connected context "${name}" is a standard context and cannot be updated by this plugin.`
+      );
+      print("Provide a new name to save this conversation as a lite context.");
+      return;
+    }
+    print("Save action: create");
+    print("Context name: derive a short, specific name from the conversation");
+    return;
+  }
+
+  const candidates = [...state.contexts];
+  if (
+    state.selection &&
+    !candidates.some((context) => context.id === state.selection.contextId)
+  ) {
+    candidates.push({
+      id: state.selection.contextId,
+      name: state.selection.contextName,
+      kind: state.selection.kind,
+      missing: true
+    });
+  }
+
+  const exact = candidates.filter(
+    (context) => saveNameKey(context.name) === saveNameKey(query)
+  );
+  if (exact.length > 1) {
+    print("Save action: choose");
+    print(`More than one context is named "${query}".`);
+    for (const context of exact) {
+      print(`  ${context.name} (${context.kind})`);
+    }
+    print("Choose a distinct new name or resolve the duplicate before saving.");
+    return;
+  }
+  if (exact.length === 1) {
+    const target = exact[0];
+    if (target.missing && target.kind === "lite") {
+      print("Save action: unavailable");
+      print(`The lite context "${target.name}" no longer exists on disk.`);
+      print("Choose a new context name or connect another lite context.");
+      return;
+    }
+    if (target.kind !== "lite") {
+      print("Save action: unavailable");
+      print(
+        `The existing context "${target.name}" is a standard context and cannot be updated by this plugin.`
+      );
+      print("Choose a different name to create a lite context.");
+      return;
+    }
+    await printUpdateTarget(target);
+    return;
+  }
+
+  const similar = similarSaveTargets(candidates, query);
+  if (similar.length > 0) {
+    print("Save action: choose");
+    print(`No context is named exactly "${query}", but these names are similar:`);
+    for (const context of similar) {
+      print(`  ${context.name} (${context.kind})`);
+    }
+    print(`Confirm whether to create "${query}", or use an exact existing name to update it.`);
+    return;
+  }
+
+  print("Save action: create");
+  print(`Context name: ${query}`);
 }
 
 async function commandUse(state, query) {
@@ -441,7 +607,32 @@ async function commandCreate(flags) {
 // The model in the active Claude Code session writes the capture spec: it is
 // the only process that can see the conversation, and reusing it avoids a
 // second model call or a transcript reader. This command validates that output,
-// turns it into files, and registers the resulting lite context atomically.
+// turns it into files, and creates or updates the selected lite context.
+function printChangedFiles(label, files) {
+  if (files.length === 0) {
+    return;
+  }
+  print(`  ${label}: ${files.join(", ")}`);
+}
+
+function printUpdatePreview(preview) {
+  const { record, changes } = preview;
+  print(`Update the "${record.name}" lite context?`);
+  print(`  Domain profile: ${preview.profileChanged ? "changed" : "unchanged"}`);
+  print(`  Routing description: ${preview.routingChanged ? "changed" : "unchanged"}`);
+  print(
+    `  Knowledge files: ${changes.added.length} added, ` +
+      `${changes.updated.length} updated, ${changes.removed.length} removed`
+  );
+  printChangedFiles("Add", changes.added);
+  printChangedFiles("Update", changes.updated);
+  printChangedFiles("Remove", changes.removed);
+  if (!record.knowledgeManaged) {
+    print(`  Linked knowledge folder will not be modified: ${record.knowledgeFolder}`);
+  }
+  print("Re-run this save with --yes to confirm.");
+}
+
 async function commandSave(flags) {
   const source = typeof flags.from === "string" ? flags.from : "";
   if (source.trim().length === 0) {
@@ -462,6 +653,35 @@ async function commandSave(flags) {
   }
 
   try {
+    if (typeof capture.targetId === "string" && capture.targetId.length > 0) {
+      const preview = await previewCapturedLiteUpdate(capture);
+      if (!preview.changed) {
+        print(`The capture does not change the "${preview.record.name}" context.`);
+        return;
+      }
+      if (flags.yes !== true && flags.yes !== "true") {
+        printUpdatePreview(preview);
+        return;
+      }
+      const result = await updateCapturedLite(capture);
+      await putCard(result.record.id, {
+        useWhen: result.routingDescription,
+        source: result.profileText
+      }).catch(() => undefined);
+      if (flags.consume === true || flags.consume === "true") {
+        await rm(source, { force: true });
+      }
+      print(`Updated context: ${result.record.name}`);
+      print(`Lite context folder: ${result.record.directory}`);
+      print(`Profile path: ${result.record.profilePath}`);
+      print(`Knowledge folder: ${result.record.knowledgeFolder}`);
+      if (!result.record.knowledgeManaged) {
+        print(`Conversation knowledge folder: ${result.record.conversationKnowledgeFolder}`);
+      }
+      print(`Use command: /neatcontext:use ${result.record.name}`);
+      return;
+    }
+
     const result = await createCapturedLite({
       ...capture,
       capturedFrom: "claude-code-conversation"
@@ -603,6 +823,10 @@ async function run() {
   }
   if (command === "list") {
     commandList(state, { liteOnly: flags.lite === true || flags.lite === "true" });
+    return;
+  }
+  if (command === "save-target") {
+    await commandSaveTarget(state, query);
     return;
   }
   if (command === "use") {

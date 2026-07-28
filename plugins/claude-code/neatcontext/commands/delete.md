@@ -26,9 +26,10 @@ Based on the list above:
 
   Then **confirm with the user**, relaying exactly what the preview says will
   happen. A fresh context from `/neatcontext:create` points at user-owned
-  knowledge that is left untouched. A conversation context from
-  `/neatcontext:save` owns generated knowledge inside its bundle, so that
-  generated folder is deleted with the context.
+  knowledge that is left untouched; any conversation additions later saved
+  into its local bundle are deleted with the context. A conversation context
+  first made by `/neatcontext:save` owns all generated knowledge inside its
+  bundle, so that generated folder is deleted with the context.
 - Only after they confirm, run:
 
   ```

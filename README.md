@@ -92,6 +92,10 @@ Use command: /neatcontext:use event-partition-investigation
 The saved context keeps the investigation approach, system knowledge, findings,
 and verified resolution—not the raw conversation.
 
+After more work on the same subject, run
+`/neatcontext:save event-partition-investigation` again. Because that exact name
+already exists, Claude previews a merged update and asks before applying it.
+
 When a similar issue appears later, connect the saved context in a new Claude
 Code session by using `/neatcontext:use`. The NeatContext plugin can also route you to the right context in
 `auto` or `ask` mode.
@@ -112,8 +116,20 @@ Claude: I will start with the checks from the saved context: per-partition lag,
 
 ### `/neatcontext:save [name]`
 
-Save the useful work in the current conversation as a new lite context. The
-name is optional; Claude chooses a specific name if you omit it.
+Save the useful work in the current conversation using familiar Save / Save As
+behavior:
+
+- With no name, update the connected lite context after confirmation. If no
+  lite context is connected, create a new one with a name Claude derives.
+- With the exact name of an existing lite context, update it after
+  confirmation. It does not need to be connected, and saving does not switch
+  the current connection.
+- With a new name, create a new lite context.
+
+Updates merge durable new work with the context's existing profile and
+conversation knowledge. For a context created with `/neatcontext:create`, its
+linked knowledge folder remains untouched; conversation-derived additions are
+stored inside the lite-context bundle.
 
 Use this after a conversation has produced decisions, plans, troubleshooting
 results, implementation notes, or other work worth preserving and reusing later.
@@ -141,7 +157,9 @@ Create a fresh lite context instead of saving the current conversation. Claude
 asks what the context is for, which existing folder contains its knowledge, and
 what to call it.
 
-The knowledge folder stays where it is; the command does not copy or move it.
+The knowledge folder stays where it is; the command does not copy, move, or
+overwrite it. Later `/neatcontext:save` updates keep generated conversation
+knowledge inside the lite-context bundle.
 
 ### `/neatcontext:import [folder]`
 
@@ -156,8 +174,8 @@ Delete a lite context after confirmation. Standard contexts must be deleted in
 the NeatContext desktop app.
 
 For a context created with `/neatcontext:create`, your original knowledge folder
-is left untouched. For a context created with `/neatcontext:save`, its generated
-knowledge is deleted with the context.
+is left untouched. Generated conversation knowledge stored inside any lite
+context is deleted with that context.
 
 ### `/neatcontext:mode [auto|ask|manual]`
 
@@ -182,8 +200,10 @@ A lite context contains:
 
 - **One domain profile** — your team's rules, terminology, constraints, and
   preferred ways of working. It guides how Claude behaves and answers.
-- **One knowledge folder** — TSGs, runbooks, decisions, troubleshooting notes,
-  session summaries, and other knowledge Claude can use.
+- **One primary knowledge folder** — TSGs, runbooks, decisions,
+  troubleshooting notes, session summaries, and other knowledge Claude can
+  use. When the primary folder is linked from `/neatcontext:create`, saved
+  conversation additions stay in the local context bundle.
 - **No extensions.**
 
 Use `/neatcontext:save` to generate one from the current conversation,
@@ -221,18 +241,19 @@ app installed and open while using a standard context.
 - The plugin runs only the Node.js files bundled in this repository. Its desktop
   integration connects to the NeatContext companion service on `127.0.0.1`; the
   plugin itself makes no outbound internet requests.
-- Lite contexts are stored locally under `~/.neatcontext/lite`. Saving a
-  conversation first creates a gitignored `.neatcontext-capture-*.json` scratch
-  file in the current project and removes it after a successful save.
+- Lite contexts are stored locally under `~/.neatcontext/lite`. Saving or
+  updating from a conversation first creates a gitignored
+  `.neatcontext-capture-*.json` scratch file in the current project and removes
+  it after a successful save.
 - A connected context's profile and selected knowledge files are read into the
   Claude Code session when Claude uses them. They are then handled like other
   content supplied to Claude Code. Standard-context extension tools may contact
   services configured separately in NeatContext.
 - Import only bundles you trust. Their profile and Markdown knowledge become
   instructions and source material available to Claude.
-- Deleting a lite context always requires confirmation. The plugin deletes
-  generated knowledge owned by a saved bundle, but never deletes an external
-  knowledge folder referenced by `/neatcontext:create`.
+- Creating or updating a lite context never overwrites an external knowledge
+  folder referenced by `/neatcontext:create`. Deleting a lite context always
+  requires confirmation and removes its bundle-local generated knowledge.
 
 ## License
 
