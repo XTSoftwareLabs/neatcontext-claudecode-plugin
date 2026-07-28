@@ -1,6 +1,6 @@
 {
   "name": "neatcontext-plugins",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Host integrations that save AI coding work as reusable, domain-aware context.",
   "type": "module",
   "private": true,
