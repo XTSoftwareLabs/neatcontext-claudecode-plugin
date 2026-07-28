@@ -24,16 +24,6 @@ with the knowledge it needs instead of asking you to explain everything again.
 You can also share the context with teammates, so the whole team benefits from
 what one person learned.
 
-### How is this different from saving or resuming a conversation?
-
-| | Best for | What you get |
-|---|---|---|
-| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> Both are generated automatically. Together, they provide reusable context—not just a conversation transcript. See [Context types](#context-types) for details. |
-| **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
-| **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
-
-**NeatContext keeps what will help Claude work accurately next time, without carrying over the entire chat.**
-
 ## Install
 
 In a terminal, run:
@@ -46,13 +36,6 @@ claude plugin install neatcontext@neatcontext --scope user
 Then start or restart Claude Code. If you are already in Claude Code, the
 equivalent commands are `/plugin marketplace add` and `/plugin install`.
 
-Requirements:
-
-- Claude Code 2.1.196 or later
-- Node.js 18 or later
-- The NeatContext desktop app only if you want to use standard contexts created
-  in the app
-
 The plugin manifest and its self-hosted marketplace can be checked before
 installation with:
 
@@ -60,6 +43,13 @@ installation with:
 claude plugin validate . --strict
 claude plugin validate plugins/claude-code/neatcontext --strict
 ```
+
+Requirements:
+
+- Claude Code 2.1.196 or later
+- Node.js 18 or later
+- The NeatContext desktop app only if you want to use standard contexts created
+  in the app
 
 ## Quick start: reuse a complex investigation
 
@@ -199,6 +189,16 @@ A lite context contains:
 Use `/neatcontext:save` to generate one from the current conversation,
 `/neatcontext:create` to use an existing knowledge folder, or
 `/neatcontext:import` to add one shared by a teammate.
+
+### How is this different from saving or resuming a conversation?
+
+| | Best for | What you get |
+|---|---|---|
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> Both are generated automatically. Together, they provide reusable context—not just a conversation transcript. See [Context types](#context-types) for details. |
+| **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
+| **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
+
+**NeatContext keeps what will help Claude work accurately next time, without carrying over the entire chat.**
 
 ### Standard context
 
