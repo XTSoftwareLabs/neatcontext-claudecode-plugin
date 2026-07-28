@@ -9,6 +9,17 @@ Extract domain knowledge and save useful work from a Claude Code conversation
 as structured, reusable context that you can use in later sessions or share
 with others.
 
+<p>
+  <a href="https://www.youtube.com/watch?v=p3x5Pxw3XBE">
+    <strong>▶ Watch the NeatContext demo</strong>
+    <img
+      src="https://img.youtube.com/vi/p3x5Pxw3XBE/maxresdefault.jpg"
+      alt="Watch the NeatContext demo"
+      width="100%"
+    />
+  </a>
+</p>
+
 ## Why NeatContext?
 
 Domain knowledge is what helps an LLM answer accurately for your team—your
