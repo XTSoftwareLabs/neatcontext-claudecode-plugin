@@ -22,7 +22,8 @@ what one person learned.
 ## Install
 
 ```bash
-codex plugin marketplace add XTSoftwareLabs/neatcontext-plugins && codex plugin add neatcontext@neatcontext
+codex plugin marketplace add XTSoftwareLabs/neatcontext-plugins
+codex plugin add neatcontext@neatcontext
 ```
 
 ## Quick start: reuse a complex investigation
