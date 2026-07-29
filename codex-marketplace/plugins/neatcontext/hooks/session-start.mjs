@@ -39,9 +39,15 @@ const menu = renderMenu(menuEntries(contexts, state), {
   mode
 });
 
+const groundingGuidance = selection
+  ? `The "${selection.contextName}" context is selected for this thread. For a request in its scope, call \`get_context\` only if its result is not already present since the latest context switch or compaction; otherwise reuse the existing result. Do not call \`get_context\` merely to check connection status.`
+  : contexts.length > 0
+    ? "No NeatContext context is selected for this thread. Do not call `get_context` to check connection status. Follow the routing menu, and load grounding only after `use_context` succeeds."
+    : "No NeatContext contexts are currently available. Do not call `get_context`. Continue normal work without NeatContext grounding unless the user asks to create or import a context.";
+
 const guidance = [
   "NeatContext is installed for this Codex thread.",
-  "For requests that depend on the user's domain, documents, tools, or team conventions, call `get_context` before answering and ground the answer in what it returns.",
+  groundingGuidance,
   "Connect or switch contexts inside this thread with `use_context` or the explicit `$neatcontext:use` skill. Disconnect the current context with `$neatcontext:disconnect`. Do not tell the user to select a context in the desktop app.",
   menu,
   "Use `$neatcontext:save` to preserve durable work from the visible conversation. Never parse Codex transcript files for that workflow."

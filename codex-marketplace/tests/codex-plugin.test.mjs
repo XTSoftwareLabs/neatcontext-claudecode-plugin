@@ -218,10 +218,16 @@ test("SessionStart hook emits thread-scoped routing guidance", async () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.hookEventName, "SessionStart");
   assert.match(output.hookSpecificOutput.additionalContext, /NeatContext is installed/);
+  assert.match(output.hookSpecificOutput.additionalContext, /No NeatContext contexts are currently available/);
+  assert.match(output.hookSpecificOutput.additionalContext, /Do not call `get_context`/);
+  assert.doesNotMatch(
+    output.hookSpecificOutput.additionalContext,
+    /call `get_context` before answering/
+  );
   assert.match(output.hookSpecificOutput.additionalContext, /\$neatcontext:save/);
 });
 
-test("MCP bridge initializes offline and advertises grounding and routing tools", async () => {
+test("MCP bridge does not advertise get_context for an empty installation", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-mcp-"));
   const rpc = rpcSession({
     NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
@@ -236,14 +242,93 @@ test("MCP bridge initializes offline and advertises grounding and routing tools"
     });
     assert.equal(initialized.result.serverInfo.name, "neatcontext");
     assert.equal(initialized.result.capabilities.tools.listChanged, true);
+    assert.match(initialized.result.instructions, /Do not call get_context merely/);
+    assert.match(initialized.result.instructions, /continue normal work without NeatContext grounding/);
+    assert.doesNotMatch(initialized.result.instructions, /call the get_context tool and let/);
 
     const listed = await rpc.call({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const names = listed.result.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ["get_context", "preview_context", "use_context"]);
-    assert.equal(
-      listed.result.tools.find((tool) => tool.name === "get_context").annotations.readOnlyHint,
-      true
-    );
+    assert.deepEqual(names, ["preview_context", "use_context"]);
+
+    const staleCall = await rpc.call({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "get_context", arguments: {} }
+    });
+    assert.match(staleCall.result.content[0].text, /Continue normal work/);
+    assert.match(staleCall.result.content[0].text, /do not retry/i);
+  } finally {
+    rpc.close();
+  }
+});
+
+test("selected contexts advertise one-shot grounding guidance", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-selected-"));
+  const capturePath = path.join(home, "capture.json");
+  const env = {
+    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    CODEX_THREAD_ID: "selected-thread"
+  };
+  await writeFile(
+    capturePath,
+    JSON.stringify({
+      schema: 1,
+      name: "Selected smoke context",
+      profile:
+        "# Selected smoke context\n\n## Purpose\nTest selected grounding.\n\n## What to do\nUse saved evidence.\n\n## What to avoid\nDo not invent evidence.\n\n## Behavior\nBe concise.",
+      routingDescription: "Use for selected Codex grounding tests.",
+      knowledge: [
+        {
+          path: "session-summary.md",
+          content: "# Session summary\n\nSelected grounding is available."
+        }
+      ]
+    }),
+    "utf8"
+  );
+  assert.equal((await runNode(cli, ["save", "--from", capturePath, "--consume"], { env })).code, 0);
+
+  const hookInput = JSON.stringify({
+    session_id: "selected-thread",
+    hook_event_name: "SessionStart",
+    source: "startup",
+    cwd: marketplaceRoot
+  });
+  const unselectedHookResult = await runNode(hook, [], {
+    env,
+    input: hookInput
+  });
+  assert.equal(unselectedHookResult.code, 0);
+  const unselectedHook =
+    JSON.parse(unselectedHookResult.stdout).hookSpecificOutput.additionalContext;
+  assert.match(unselectedHook, /No NeatContext context is selected/);
+  assert.match(unselectedHook, /load grounding only after `use_context` succeeds/);
+
+  assert.equal((await runNode(cli, ["use", "Selected smoke context"], { env })).code, 0);
+  const hookResult = await runNode(hook, [], { env, input: hookInput });
+  assert.equal(hookResult.code, 0);
+  const hookOutput = JSON.parse(hookResult.stdout).hookSpecificOutput.additionalContext;
+  assert.match(hookOutput, /"Selected smoke context" context is selected/);
+  assert.match(hookOutput, /otherwise reuse the existing result/);
+  assert.match(hookOutput, /Do not call `get_context` merely/);
+
+  const rpc = rpcSession(env);
+  try {
+    const initialized = await rpc.call({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test" } }
+    });
+    assert.match(initialized.result.instructions, /only when its current result is not already present/);
+    assert.match(initialized.result.instructions, /Never call get_context merely/);
+
+    const listed = await rpc.call({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    const getContext = listed.result.tools.find((tool) => tool.name === "get_context");
+    assert.equal(getContext.annotations.readOnlyHint, true);
+    assert.match(getContext.description, /already selected for this thread/);
+    assert.match(getContext.description, /Do not call merely/);
   } finally {
     rpc.close();
   }

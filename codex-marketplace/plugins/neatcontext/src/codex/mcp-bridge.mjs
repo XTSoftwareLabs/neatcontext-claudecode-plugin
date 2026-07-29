@@ -18,10 +18,12 @@
 //   * while nothing is connected, the tool list is trimmed to get_context: the
 //     app's runtime file outlives its connection, so it can still advertise the
 //     previous context's extension tools.
+//   * when no Context exists and no selection is remembered, get_context is
+//     removed as well so the model cannot turn it into a status poll.
 //   * if the backend child was respawned (or NeatContext just started), a
 //     "not initialized" error triggers a transparent re-handshake + retry.
 //   * if NeatContext is not reachable, we answer locally so the MCP server still
-//     loads; get_context then tells the user to connect with $neatcontext:use.
+//     loads; stale get_context calls explain how to connect and not to retry.
 //
 // Source seam: a session is served by one of two sources, chosen per message
 // from the recorded selection. A *standard* context is NeatContext's and is
@@ -62,8 +64,9 @@ const GET_CONTEXT_TOOL = {
   name: "get_context",
   title: "Get Context",
   description:
-    "Get the connected NeatContext Context: domain profile files to read, local " +
-    "knowledge folders to search, and the extension tools available on this connection.",
+    "Load the domain profile, local knowledge pointers, and extension tools for the " +
+    "NeatContext Context already selected for this thread. Do not call merely to discover " +
+    "whether a Context is selected.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   annotations: {
     readOnlyHint: true,
@@ -72,14 +75,14 @@ const GET_CONTEXT_TOOL = {
     openWorldHint: false
   }
 };
-// The one thing to say when a session has nothing to ground in. It is
-// deliberately about what to do *here*: the app being closed, mid-restart, or
-// holding no connection are all the same situation from inside Codex, and
-// all of them are answered by picking a context from this session.
+// The one thing to say when a stale client calls get_context with nothing
+// selected. It keeps the optional plugin from blocking ordinary work and
+// identifies the explicit events that make another call useful.
 const NOTHING_CONNECTED =
-  "No NeatContext Context is connected to this session. Connect one with " +
-  "`$neatcontext:use`, or create a local one with `$neatcontext:create` — that one needs " +
-  "nothing else installed. Until then, do not answer from general knowledge.";
+  "No NeatContext Context is selected for this thread. Continue normal work without " +
+  "NeatContext grounding. Do not call get_context again unless use_context succeeds or the " +
+  "user explicitly asks to refresh NeatContext state. Connect one with `$neatcontext:use`, " +
+  "or create a local one with `$neatcontext:create`.";
 
 // How connecting works in Codex, stated by the plugin because NeatContext
 // cannot state it: its own framing is written for its desktop client, where
@@ -92,6 +95,12 @@ const CONNECTION_RULE = `## Connecting a context, in Codex
 Contexts are connected from this thread and nowhere else: the \`use_context\` tool, or \`$neatcontext:use <name>\` run by the user. \`$neatcontext:disconnect\` disconnects the current one from this thread. \`$neatcontext:create\` makes a new local one from here.
 
 Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
+
+const GROUNDING_RULE = `## Loading grounding
+
+\`get_context\` loads the Context already selected for this thread; it is not a connection-status probe. Call it for a request in that Context's scope only when its current result is not already present since the latest context switch or compaction. Otherwise reuse the existing result.
+
+If \`get_context\` reports that nothing is selected, continue normal work without NeatContext grounding and do not retry until \`use_context\` succeeds or the user explicitly asks to refresh NeatContext state.`;
 
 // The two tools that let a session change what it is grounded in. They are the
 // plugin's whole routing mechanism: there is no model in any process here, so
@@ -175,30 +184,23 @@ const ROUTING_TOOLS = new Map([
 // instructions do one job: get get_context called at the right moments.
 const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and local knowledge stored on this machine.
 
-Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
+For a request in the selected Context's scope, call get_context only when its current result is not already present since the latest context switch or compaction. Otherwise reuse the existing result. Never call get_context merely to check connection status.
+
+When get_context is needed, read the returned profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session. Search the returned knowledge folder for relevant evidence.
 
 A lite context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
 
 Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
 
-// Written to survive being wrong. These instructions are fixed at the handshake
-// and MCP cannot revise them, but what they describe changes freely: NeatContext
-// may not have finished starting when the host spawned this process, and a
-// Context can be connected afterwards — from this session or another window.
-//
-// So this must never state "nothing is connected" as a settled fact. A session
-// told that carries it for its whole life and answers it back to the user
-// without ever calling get_context, which by then would have returned a
-// perfectly good Context. Describing the handshake and deferring the current
-// state to the tool is the only thing that stays true.
-const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context was connected at the moment this session started. That says nothing about now: NeatContext may still have been starting up, and a Context can be connected at any time, from this session or another window.
+// Written to survive being stale. MCP instructions are fixed at the handshake,
+// while selection changes are delivered through use_context and tools/list_changed.
+// The handshake therefore neither settles the current connection state nor asks
+// the model to poll for it on unrelated prompts.
+const NO_CONTEXT_INSTRUCTIONS = `The NeatContext bridge could not load a Context during initialization. Initialization state is not a request to poll.
 
-These instructions are fixed at the handshake and cannot be updated, so they are not evidence about the current state — and you must not tell the user nothing is connected on the strength of this text.
+Do not call get_context merely to discover whether a Context is selected. Call it only after routing guidance marks a Context as selected, and only when its current result is not already present since the latest context switch or compaction.
 
-When the user asks anything that depends on their own domain, documents, tools, or team conventions, call the get_context tool and let its answer decide:
-
-- If it returns a Context, ground your answer in it and cite what you used.
-- Only if it reports that nothing is connected, say so, and tell them to connect one with $neatcontext:use — or to create a local one with $neatcontext:create, which needs no other software.`;
+If no Context is selected, continue normal work without NeatContext grounding. A successful use_context call or an explicit $neatcontext:use command will tell you when grounding should be loaded.`;
 
 // Methods whose answer depends on which context is connected.
 const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);
@@ -527,6 +529,30 @@ function withConnectedTools(response, state) {
   };
 }
 
+// An empty installation has nothing get_context could load. Hiding the tool
+// makes that invariant deterministic instead of relying on the model to ignore
+// a safe-looking status probe. Routing tools remain available so an explicit
+// use_context can discover a Context that appeared after initialization.
+async function withoutEmptyGroundingTool(response) {
+  if (!Array.isArray(response?.result?.tools)) {
+    return response;
+  }
+  const [{ contexts }, selection] = await Promise.all([
+    listAllContexts(),
+    readSelection().catch(() => null)
+  ]);
+  if (contexts.length > 0 || selection) {
+    return response;
+  }
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      tools: response.result.tools.filter((tool) => tool.name !== GET_CONTEXT_TOOL.name)
+    }
+  };
+}
+
 async function forward(message) {
   try {
     let response = await source.postMcp(message);
@@ -613,18 +639,17 @@ async function handleMessage(message) {
   }
 }
 
-// What the plugin adds to whichever source answered: how connecting works here,
-// and the routing menu when there is one. Both ride on both channels on purpose.
-// In the handshake, so the session knows what else exists without having to call
-// anything; in every get_context result, because that one is re-read on every
-// call and the handshake cannot be. Change the mode mid-session and the second
-// channel is what makes it take effect.
+// What the plugin adds to whichever source answered: how grounding and
+// connecting work here, and the routing menu when there is one. These ride on
+// both channels on purpose. In the handshake, so the session knows what else
+// exists without calling anything; in every get_context result, because that
+// one is re-read live while the handshake cannot be.
 //
 // The connection rule goes last, so it is the closest thing to the answer the
 // session is about to write — and it is the one part that is never omitted.
 async function pluginNotes() {
   const menu = await routingMenu();
-  return menu ? `${menu}\n\n${CONNECTION_RULE}` : CONNECTION_RULE;
+  return [menu, GROUNDING_RULE, CONNECTION_RULE].filter(Boolean).join("\n\n");
 }
 
 async function withNotes(response, place) {
@@ -661,7 +686,8 @@ async function shapeResponse(message, response, lite, state) {
   }
   if (message.method === "tools/list") {
     const connected = lite ? response : withConnectedTools(response, state);
-    return await withRoutingTools(connected);
+    const available = await withoutEmptyGroundingTool(connected);
+    return await withRoutingTools(available);
   }
   if (message.method === "tools/call" && message.params?.name === GET_CONTEXT_TOOL.name) {
     // With nothing connected, NeatContext answers in terms of its own client:
