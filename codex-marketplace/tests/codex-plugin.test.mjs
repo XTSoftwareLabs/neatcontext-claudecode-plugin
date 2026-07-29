@@ -103,6 +103,7 @@ test("marketplace and plugin manifests describe an isolated Codex package", asyn
 
   const mcp = JSON.parse(await readFile(path.join(pluginRoot, ".mcp.json"), "utf8"));
   assert.deepEqual(mcp.mcpServers.neatcontext.args, ["./src/codex/mcp-bridge.mjs"]);
+  assert.deepEqual(mcp.mcpServers.neatcontext.env_vars, ["CODEX_THREAD_ID"]);
   assert.equal(mcp.mcpServers.neatcontext.cwd, ".");
 });
 
