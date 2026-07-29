@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const marketplaceRoot = path.resolve(here, "..");
+const repositoryRoot = path.resolve(marketplaceRoot, "..");
 const pluginRoot = path.join(marketplaceRoot, "plugins", "neatcontext");
 const cli = path.join(pluginRoot, "src", "codex", "neatcontext-cli.mjs");
 const bridge = path.join(pluginRoot, "src", "codex", "mcp-bridge.mjs");
@@ -77,11 +78,21 @@ function rpcSession(env) {
 }
 
 test("marketplace and plugin manifests describe an isolated Codex package", async () => {
-  const marketplace = JSON.parse(
+  const localMarketplace = JSON.parse(
     await readFile(path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json"), "utf8")
   );
-  assert.equal(marketplace.plugins[0].source.path, "./plugins/neatcontext");
-  assert.equal(marketplace.plugins[0].policy.installation, "AVAILABLE");
+  assert.equal(localMarketplace.plugins[0].source.path, "./plugins/neatcontext");
+  assert.equal(localMarketplace.plugins[0].policy.installation, "AVAILABLE");
+
+  const gitMarketplace = JSON.parse(
+    await readFile(path.join(repositoryRoot, ".agents", "plugins", "marketplace.json"), "utf8")
+  );
+  assert.equal(gitMarketplace.name, "neatcontext");
+  assert.equal(
+    gitMarketplace.plugins[0].source.path,
+    "./codex-marketplace/plugins/neatcontext"
+  );
+  assert.equal(gitMarketplace.plugins[0].policy.installation, "AVAILABLE");
 
   const manifest = JSON.parse(
     await readFile(path.join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")

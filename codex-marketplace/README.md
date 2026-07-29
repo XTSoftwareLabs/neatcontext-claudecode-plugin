@@ -1,41 +1,215 @@
 # NeatContext for Codex
 
-This directory is an isolated Codex marketplace. It does not modify or package
-the Claude Code plugin under `plugins/claude-code/neatcontext`.
+Extract domain knowledge and save useful work from a Codex conversation as
+structured, reusable context that you can use in later threads or share with
+others.
 
-## Install locally
+## Why NeatContext?
 
-From the repository root:
+Domain knowledge is what helps an LLM answer accurately for your team—your
+systems, constraints, decisions, terminology, and ways of working.
 
-```powershell
-codex plugin marketplace add .\codex-marketplace
-codex plugin add neatcontext@personal
+You naturally build that knowledge while doing hard work with Codex. Long
+conversations about debugging, planning, incidents, and implementation already
+contain discoveries that will matter again. NeatContext extracts the durable
+knowledge from those conversations and saves it as a structured context.
+
+Connect that context in a new thread or during later work, and Codex can start
+with the knowledge it needs instead of asking you to explain everything again.
+You can also share the context with teammates, so the whole team benefits from
+what one person learned.
+
+## Install
+
+```bash
+codex plugin marketplace add XTSoftwareLabs/neatcontext-plugins && codex plugin add neatcontext@neatcontext
 ```
 
-Start a new Codex thread after installation. Review and trust the plugin's
-`SessionStart` hook with `/hooks` when prompted.
+## Quick start: reuse a complex investigation
+
+Suppose you work through a difficult production issue with Codex:
+
+```text
+You: Some orders take ten minutes to update, but overall queue lag looks normal.
+     Help me investigate.
+
+Codex: Let's correlate Order API traces, the order-events consumer metrics,
+       and the order-projection worker logs. Start with per-partition lag
+       instead of the aggregate metric.
+
+You: Grafana shows that partition 17 is falling behind while the others are
+     healthy. Tempo traces show the Order API publishes events without delay.
+
+Codex: Check the Loki logs for the order-projection workers on partition 17.
+       Look for deserialization time, payload size, and the producing service.
+
+You: The worker logs show 12-second deserialization times for large events from
+     catalog-sync. Its logs confirm that bulk updates for tenant-42 all use the
+     same partition key. Splitting those updates cleared the lag.
+
+Codex: The root cause was a hot partition: large catalog-sync events blocked
+       later order events, while the aggregate lag metric hid the problem. For
+       similar issues, check per-partition lag, traces from the producing
+       service, worker deserialization logs, payload size, and partition keys
+       before scaling consumers.
+```
+
+This is useful work you may want to save. Invoke the save skill:
+
+```text
+You: $neatcontext:save event-partition-investigation
+
+Codex:
+Lite context folder: C:\Users\alex\.neatcontext\lite\event-partition-investigation
+Profile path: C:\Users\alex\.neatcontext\lite\event-partition-investigation\profile.md
+Knowledge folder: C:\Users\alex\.neatcontext\lite\event-partition-investigation\knowledge
+Use command: $neatcontext:use event-partition-investigation
+```
+
+The saved context keeps the investigation approach, system knowledge, findings,
+and verified resolution—not the raw conversation.
+
+After more work on the same subject, invoke
+`$neatcontext:save event-partition-investigation` again. Because that exact name
+already exists, Codex previews a merged update and asks before applying it.
+
+When a similar issue appears later, connect the saved context in a new Codex
+thread with `$neatcontext:use`. NeatContext can also route you to the right
+context in `auto` or `ask` mode.
+
+```text
+You: $neatcontext:use event-partition-investigation
+
+Codex: Connected to event-partition-investigation.
+
+You: Shipment updates are delayed, but overall queue lag is low. Help me
+     investigate.
+
+Codex: I will start with the checks from the saved context: per-partition lag,
+       event size, partition keys, and deserialization time.
+```
 
 ## Skills
 
-- `$neatcontext:save`
-- `$neatcontext:use`
-- `$neatcontext:disconnect`
-- `$neatcontext:list`
-- `$neatcontext:status`
-- `$neatcontext:create`
-- `$neatcontext:import`
-- `$neatcontext:delete`
-- `$neatcontext:mode`
+Codex can select an installed NeatContext skill when your request matches its
+purpose. Use a `$` mention when you want to invoke a specific skill explicitly.
 
-The plugin shares the existing schema-1 NeatContext store by default. For
-isolated development, set `NEATCONTEXT_COMPANION_FILE` to a temporary
-`companion.json` path; lite contexts and routing state will be stored beside
-that file.
+### `$neatcontext:save [name]`
 
-## Verify
+Save useful work from the current conversation using familiar Save / Save As
+behavior:
 
-```powershell
-node --test codex-marketplace/tests/codex-plugin.test.mjs
-python "$env:USERPROFILE\.codex\skills\.system\plugin-creator\scripts\validate_plugin.py" `
-  .\codex-marketplace\plugins\neatcontext
+- With no name, update the connected lite context after confirmation. If no
+  lite context is connected, create a new one with a name Codex derives.
+- With the exact name of an existing lite context, update it after
+  confirmation. It does not need to be connected, and saving does not switch
+  the current connection.
+- With a new name, create a new lite context.
+
+Updates merge durable new work with the context's existing profile and
+conversation knowledge. For a context created with `$neatcontext:create`, its
+linked knowledge folder remains untouched; conversation-derived additions are
+stored inside the lite-context bundle.
+
+Use this after a conversation has produced decisions, plans, troubleshooting
+results, implementation notes, or other work worth preserving and reusing
+later.
+
+### `$neatcontext:use [name or number]`
+
+Connect a context to the current Codex thread.
+
+Invoke the skill without a name to see the available choices. Each Codex thread
+keeps its own connected context.
+
+### `$neatcontext:disconnect`
+
+Disconnect the context from the current Codex thread. Other threads keep their
+own connections, and the context itself is not deleted.
+
+### `$neatcontext:list`
+
+List all contexts you can connect.
+
+### `$neatcontext:status`
+
+Show the context connected to the current thread and the current routing mode.
+It also reports problems such as missing lite-context files or knowledge
+folders.
+
+### `$neatcontext:create`
+
+Create a fresh lite context instead of saving the current conversation. Codex
+asks what the context is for, which existing folder contains its knowledge, and
+what to call it.
+
+The knowledge folder stays where it is; the skill does not copy, move, or
+overwrite it. Later `$neatcontext:save` updates keep generated conversation
+knowledge inside the lite-context bundle.
+
+### `$neatcontext:import [folder]`
+
+Import a lite-context bundle shared by someone else. Importing creates your own
+local copy and leaves the shared folder unchanged.
+
+After importing, connect it with `$neatcontext:use <name>`.
+
+### `$neatcontext:delete [name or number]`
+
+Delete a lite context after confirmation. Standard contexts must be deleted in
+the NeatContext desktop app.
+
+For a context created with `$neatcontext:create`, your original knowledge folder
+is left untouched. Generated conversation knowledge stored inside the lite
+context is deleted with that context.
+
+### `$neatcontext:mode [auto|ask|manual]`
+
+Choose how the current thread switches between contexts:
+
+- `ask` — ask before switching; this is the default
+- `auto` — switch on a clear match and tell you; ask when the choice is unclear
+- `manual` — switch only when you invoke `$neatcontext:use`
+
+Invoke `$neatcontext:mode` without an argument to show the current mode. Add
+`--global` to set the default for new threads:
+
+```text
+$neatcontext:mode auto --global
 ```
+
+## Context types
+
+### Lite context
+
+A lite context contains:
+
+- **One domain profile** — your team's rules, terminology, constraints, and
+  preferred ways of working. It guides how Codex behaves and answers.
+- **One primary knowledge folder** — TSGs, runbooks, decisions,
+  troubleshooting notes, session summaries, and other knowledge Codex can use.
+  When the primary folder is linked from `$neatcontext:create`, saved
+  conversation additions stay in the local context bundle.
+- **No extensions.**
+
+Use `$neatcontext:save` to generate one from the current conversation,
+`$neatcontext:create` to use an existing knowledge folder, or
+`$neatcontext:import` to add one shared by a teammate.
+
+### Standard context
+
+A standard context contains:
+
+- **One domain profile** — the team's rules that guide Codex's behavior.
+- **Multiple knowledge folders** — indexed collections of team documentation
+  that Codex can search for relevant information.
+- **Extensions** — connections to internal and external systems that let Codex
+  use the tools available to the context.
+
+Standard contexts are intended for enterprise-level use. Create and manage them
+in [NeatContext Desktop](https://www.neatcontext.com). The desktop app must be
+running while you use a standard context.
+
+## License
+
+MIT — see [LICENSE](plugins/neatcontext/LICENSE).
