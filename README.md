@@ -37,30 +37,10 @@ what one person learned.
 
 ## Install
 
-In a terminal, run:
-
 ```bash
 claude plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
 claude plugin install neatcontext@neatcontext --scope user
 ```
-
-Then start or restart Claude Code. If you are already in Claude Code, the
-equivalent commands are `/plugin marketplace add` and `/plugin install`.
-
-The plugin manifest and its self-hosted marketplace can be checked before
-installation with:
-
-```bash
-claude plugin validate . --strict
-claude plugin validate plugins/claude-code/neatcontext --strict
-```
-
-Requirements:
-
-- Claude Code 2.1.196 or later
-- Node.js 18 or later
-- The NeatContext desktop app only if you want to use standard contexts created
-  in the app
 
 ## Quick start: reuse a complex investigation
 
