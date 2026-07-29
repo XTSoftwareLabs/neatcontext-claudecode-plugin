@@ -1,0 +1,20 @@
+{
+  "name": "neatcontext",
+  "interface": {
+    "displayName": "NeatContext"
+  },
+  "plugins": [
+    {
+      "name": "neatcontext",
+      "source": {
+        "source": "local",
+        "path": "./codex-marketplace/plugins/neatcontext"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

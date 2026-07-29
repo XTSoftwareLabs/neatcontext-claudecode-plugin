@@ -21,14 +21,14 @@ what one person learned.
 
 ## Install
 
-Clone this repository, then add its Codex marketplace and install NeatContext:
+Add the NeatContext marketplace from GitHub and install the plugin:
 
 ```bash
-git clone https://github.com/XTSoftwareLabs/neatcontext-plugins.git
-cd neatcontext-plugins
-codex plugin marketplace add ./codex-marketplace
-codex plugin add neatcontext@personal
+codex plugin marketplace add XTSoftwareLabs/neatcontext-plugins && codex plugin add neatcontext@neatcontext
 ```
+
+Codex downloads the marketplace and plugin from GitHub, so you do not need to
+clone this repository.
 
 Start a new Codex session after installation. When prompted, use `/hooks` to
 review and trust the plugin's `SessionStart` hook.
