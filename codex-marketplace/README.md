@@ -21,24 +21,9 @@ what one person learned.
 
 ## Install
 
-Add the NeatContext marketplace from GitHub and install the plugin:
-
 ```bash
 codex plugin marketplace add XTSoftwareLabs/neatcontext-plugins && codex plugin add neatcontext@neatcontext
 ```
-
-Codex downloads the marketplace and plugin from GitHub, so you do not need to
-clone this repository.
-
-Start a new Codex session after installation. When prompted, use `/hooks` to
-review and trust the plugin's `SessionStart` hook.
-
-Requirements:
-
-- Codex CLI with plugin support
-- Node.js 18 or later
-- The NeatContext desktop app only if you want to use standard contexts created
-  in the app
 
 ## Quick start: reuse a complex investigation
 
