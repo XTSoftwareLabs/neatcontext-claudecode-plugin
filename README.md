@@ -9,6 +9,8 @@ Extract domain knowledge and save useful work from Claude Code, Kimi Code, or
 Codex conversations as structured, reusable context that you can use in later
 sessions or share with others.
 
+![NeatContext Claude Code demo](assets/neatcontext_claude_code_demo.gif)
+
 <p>
   <a href="https://www.youtube.com/watch?v=p3x5Pxw3XBE">
     <strong>▶ Watch the NeatContext demo</strong>
