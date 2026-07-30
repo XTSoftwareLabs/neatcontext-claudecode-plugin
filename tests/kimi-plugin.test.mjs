@@ -159,11 +159,12 @@ function toolCall(id, name, args = {}) {
 }
 
 test("Kimi manifests describe both repository and isolated package installs", async () => {
-  const [rootText, nestedText, packageText, readme] = await Promise.all([
+  const [rootText, nestedText, packageText, readme, kimiReadme] = await Promise.all([
     readFile(path.join(repositoryRoot, "kimi.plugin.json"), "utf8"),
     readFile(path.join(pluginRoot, "kimi.plugin.json"), "utf8"),
     readFile(path.join(repositoryRoot, "package.json"), "utf8"),
-    readFile(path.join(repositoryRoot, "README.md"), "utf8")
+    readFile(path.join(repositoryRoot, "README.md"), "utf8"),
+    readFile(path.join(pluginRoot, "README.md"), "utf8")
   ]);
   const root = JSON.parse(rootText);
   const nested = JSON.parse(nestedText);
@@ -207,11 +208,20 @@ test("Kimi manifests describe both repository and isolated package installs", as
       (await stat(path.resolve(pluginRoot, relative))).isFile());
   }
 
+  assert.match(readme, /\[NeatContext for Kimi Code\]\(plugins\/kimi-code\/neatcontext\/README\.md\)/);
+  assert.doesNotMatch(readme, /\/plugins install|\/reload/);
   assert.match(
-    readme,
+    kimiReadme,
     /\/plugins install https:\/\/github\.com\/XTSoftwareLabs\/neatcontext-plugins\/tree\/main/
   );
-  assert.match(readme, /\/reload/);
+  assert.match(kimiReadme, /\/reload/);
+  assert.match(
+    kimiReadme,
+    /!\[NeatContext for Kimi Code demo\]\(assets\/neatcontext_kimi_code_demo\.gif\)/
+  );
+  assert.ok(
+    (await stat(path.join(pluginRoot, "assets", "neatcontext_kimi_code_demo.gif"))).isFile()
+  );
 });
 
 test("Kimi commands and Skills are complete, session-aware, and host-native", async () => {

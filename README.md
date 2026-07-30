@@ -46,18 +46,7 @@ claude plugin install neatcontext@neatcontext --scope user
 
 ### Kimi Code
 
-Run these commands inside Kimi Code:
-
-```text
-/plugins install https://github.com/XTSoftwareLabs/neatcontext-plugins/tree/main
-/reload
-```
-
-Kimi Code exposes the same `/neatcontext:*` command names documented below and
-keeps each Kimi session's selected context isolated. Kimi Code 0.21.0 or newer
-is required; its bundled JavaScript runner means no separate Node.js install is
-needed. See the [Kimi Code package README](plugins/kimi-code/neatcontext/README.md)
-for host details.
+See [NeatContext for Kimi Code](plugins/kimi-code/neatcontext/README.md).
 
 ### Codex
 
@@ -65,8 +54,7 @@ See the [Codex marketplace README](codex-marketplace/README.md).
 
 ## Quick start: reuse a complex investigation
 
-The walkthrough below uses Claude Code. The Kimi Code commands and context
-workflows are the same.
+The walkthrough below uses Claude Code.
 
 Suppose you work through a difficult production issue with Claude:
 

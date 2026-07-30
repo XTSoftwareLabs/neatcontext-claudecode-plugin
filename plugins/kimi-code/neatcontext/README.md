@@ -3,6 +3,8 @@
 Save durable knowledge from Kimi Code conversations, reconnect it in later
 sessions, and route each session to the right local or desktop-backed context.
 
+![NeatContext for Kimi Code demo](assets/neatcontext_kimi_code_demo.gif)
+
 ## Install
 
 In Kimi Code, run:
