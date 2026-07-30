@@ -5,9 +5,9 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/github/license/XTSoftwareLabs/neatcontext-plugins)](LICENSE)
 
-Extract domain knowledge and save useful work from Claude Code, Kimi Code, or
-Codex conversations as structured, reusable context that you can use in later
-sessions or share with others.
+Extract domain knowledge and save useful work from Claude Code, Kimi Code,
+Codex, or pi conversations as structured, reusable context that you can use in
+later sessions or share with others.
 
 ![NeatContext Claude Code demo](assets/neatcontext_claude_code_demo.gif)
 
@@ -53,6 +53,16 @@ See [NeatContext for Kimi Code](plugins/kimi-code/neatcontext/README.md).
 ### Codex
 
 See the [Codex marketplace README](codex-marketplace/README.md).
+
+### pi
+
+```bash
+pi install npm:@xtsoftwarelabs/neatcontext-pi
+```
+
+See [NeatContext for pi](plugins/pi/neatcontext/README.md). pi ships no MCP, so
+this host uses a pi extension that runs inside the agent process; the commands
+use a `/neatcontext-<command>` form rather than `/neatcontext:<command>`.
 
 ## Quick start: reuse a complex investigation
 
