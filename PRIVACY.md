@@ -1,54 +1,55 @@
 # Privacy Policy
 
-**Effective date: July 28, 2026**
+**Effective date: July 30, 2026**
 
-This policy describes how the NeatContext plugin for Claude Code
-("the plugin"), published by XT SOFTWARE LABS LLC, handles information. It applies
-only to the open-source plugin in this repository. Claude Code, Anthropic
-services, the NeatContext desktop app, and third-party services configured
-through NeatContext have their own terms and privacy practices.
+This policy describes how the NeatContext host plugins for Claude Code, Kimi
+Code, and Codex ("the plugins"), published by XT SOFTWARE LABS LLC, handle
+information. It applies only to the open-source plugins in this repository.
+The coding hosts, their model providers, the NeatContext desktop app, and
+third-party services configured through NeatContext have their own terms and
+privacy practices.
 
 ## Summary
 
-- The plugin does not send telemetry, analytics, crash reports, or advertising
+- The plugins do not send telemetry, analytics, crash reports, or advertising
   data to XT SOFTWARE LABS LLC.
-- The plugin does not require an XT SOFTWARE LABS LLC account and does not use
+- The plugins do not require an XT SOFTWARE LABS LLC account and do not use
   an XT SOFTWARE LABS LLC-operated cloud service.
 - Lite contexts and operational state are stored on your computer.
-- Content is provided to Claude Code when you invoke plugin features or connect
-  a context, so that content is handled according to the terms, privacy policy,
-  and settings of your Claude or model-provider account.
+- Content is provided to the active coding host when you invoke plugin features
+  or connect a context, so that content is handled according to the terms,
+  privacy policy, and settings of that host and its configured model provider.
 - The optional NeatContext desktop integration communicates with a local
   companion service on `127.0.0.1`. Extension tools configured separately in
   NeatContext may communicate with their configured services.
 
-## Information the plugin handles
+## Information the plugins handle
 
-The plugin handles information only when needed to provide its features:
+The plugins handle information only when needed to provide their features:
 
 - **Context content:** profiles, routing descriptions, Markdown knowledge,
   context names, and portable context manifests that you create, save, or
   import.
-- **Conversation captures:** selected information from the active Claude Code
-  conversation when you invoke `/neatcontext:save`, whether creating a context
-  or updating one. The command instructs Claude to create a focused capture
-  rather than storing the entire transcript.
+- **Conversation captures:** selected information from the active coding
+  conversation when you invoke the host's NeatContext save command, whether
+  creating a context or updating one. The workflow instructs the active model
+  to create a focused capture rather than storing the entire transcript.
 - **Linked files:** paths and readable content from knowledge folders you
   explicitly connect to a lite context.
 - **Operational state:** context identifiers and names, the selected context
-  for a Claude Code session, routing mode, routing descriptions, aliases,
-  recent routing decisions or refusals, timestamps, and Claude Code session
+  for a coding-host session, routing mode, routing descriptions, aliases,
+  recent routing decisions or refusals, timestamps, and host session
   identifiers.
 - **Desktop companion connection details:** the local port and bearer token
-  written by the NeatContext desktop app. The plugin reads these details to
-  authenticate requests to the loopback companion service.
+  written by the NeatContext desktop app. The active plugin reads these details
+  to authenticate requests to the loopback companion service.
 
-The plugin does not intentionally collect account credentials, payment
+The plugins do not intentionally collect account credentials, payment
 information, advertising identifiers, or precise location information.
 
 ## Local storage
 
-By default, the plugin stores or reads data in these locations:
+By default, the plugins store or read data in these locations:
 
 - `~/.neatcontext/lite/` for lite contexts, profiles, manifests, managed
   knowledge, and conversation additions saved into contexts that link external
@@ -71,34 +72,36 @@ be repaired; you can delete it manually at any time.
 
 ## Network communication and disclosure
 
-The plugin itself has no telemetry endpoint and does not transmit information
+The plugins have no telemetry endpoint and do not transmit information
 to an XT SOFTWARE LABS LLC-operated server.
 
 The following communications can occur:
 
-1. **Claude Code and your model provider.** Plugin commands run inside Claude
-   Code. Context content returned by the plugin, and content Claude prepares
-   for a saved context, can be processed by Anthropic or another model provider
-   configured for your Claude Code environment.
-2. **NeatContext desktop.** For standard contexts, the plugin communicates with
-   the NeatContext desktop companion over HTTP on `127.0.0.1`. This can include
-   context identifiers, context documents, connection state, and MCP requests
-   or responses.
+1. **Your coding host and model provider.** Plugin commands run inside Claude
+   Code, Kimi Code, or Codex. Context content returned by a plugin, and content
+   the active model prepares for a saved context, can be processed by the model
+   provider configured for that host.
+2. **NeatContext desktop.** For standard contexts, the active plugin
+   communicates with the NeatContext desktop companion over HTTP on
+   `127.0.0.1`. This can include context identifiers, context documents,
+   connection state, and MCP requests or responses.
 3. **Configured extension services.** Standard-context extension tools may
    contact services that you or your organization configured separately in
    NeatContext. Their privacy practices govern information sent to them.
-4. **Installation and updates.** Claude Code may contact GitHub and Anthropic's
-   marketplace services to install, validate, or update the plugin. The plugin
-   does not control the diagnostic and account data those services process.
+4. **Installation and updates.** The coding host may contact GitHub and its
+   plugin or marketplace services to install, validate, or update a plugin.
+   The plugins do not control the diagnostic and account data those services
+   process.
 
-The plugin does not sell personal information or share it for cross-context
+The plugins do not sell personal information or share it for cross-context
 behavioral advertising.
 
 ## Retention and deletion
 
 Local data remains until you remove it or a plugin operation removes it:
 
-- `/neatcontext:delete` asks for confirmation before deleting a lite context.
+- The host's NeatContext delete workflow asks for confirmation before deleting
+  a lite context.
 - Deleting a lite context also deletes the generated conversation knowledge
   stored inside its local bundle.
 - Deleting a context created from an external knowledge folder does not delete
@@ -107,8 +110,8 @@ Local data remains until you remove it or a plugin operation removes it:
 - Selection, routing, and temporary files can be deleted manually from the
   locations listed above.
 
-Uninstalling the plugin does not automatically remove data under
-`~/.neatcontext`, because that data is stored outside Claude Code's plugin
+Uninstalling a plugin does not automatically remove data under
+`~/.neatcontext`, because that data is stored outside the coding host's plugin
 cache. Remove it manually if you no longer want to retain it.
 
 Imported bundles are copied into local plugin storage. The source bundle is
@@ -116,12 +119,12 @@ not modified or uploaded by the import operation.
 
 ## Security
 
-The plugin limits its desktop connection to the loopback interface and uses the
+The plugins limit their desktop connection to the loopback interface and use the
 desktop app's bearer token. Local state files containing operational metadata
 are written with restrictive permissions where the operating system supports
 them. No method of storage or processing is completely secure, so avoid saving
-secrets or sensitive information that you do not want processed by Claude Code
-or retained in a context.
+secrets or sensitive information that you do not want processed by your coding
+host or retained in a context.
 
 ## Changes to this policy
 

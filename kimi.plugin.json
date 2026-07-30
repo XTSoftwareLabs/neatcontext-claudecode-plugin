@@ -1,0 +1,39 @@
+{
+  "name": "neatcontext",
+  "version": "0.2.5",
+  "description": "Save Kimi Code work as reusable, domain-aware context",
+  "keywords": [
+    "neatcontext",
+    "context",
+    "knowledge-management",
+    "grounding",
+    "mcp"
+  ],
+  "author": {
+    "name": "XTSoftwareLabs"
+  },
+  "homepage": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
+  "license": "MIT",
+  "skills": "./plugins/kimi-code/neatcontext/skills/",
+  "sessionStart": {
+    "skill": "using-neatcontext"
+  },
+  "skillInstructions": "For NeatContext workflows, use this plugin's neatcontext-* skills and preserve the Kimi session id injected into each skill. Run bundled JavaScript commands exactly as written with kimi __plugin_run_node; do not replace it with system node.",
+  "mcpServers": {
+    "neatcontext": {
+      "command": "node",
+      "args": [
+        "./plugins/kimi-code/neatcontext/src/kimi/mcp-bridge.mjs"
+      ],
+      "cwd": "./"
+    }
+  },
+  "commands": "./plugins/kimi-code/neatcontext/commands/",
+  "interface": {
+    "displayName": "NeatContext",
+    "shortDescription": "Save Kimi Code work as reusable context",
+    "longDescription": "Extract durable knowledge from Kimi Code conversations, reconnect it in later sessions, and route each session to the right domain context.",
+    "developerName": "XTSoftwareLabs",
+    "websiteURL": "https://github.com/XTSoftwareLabs/neatcontext-plugins"
+  }
+}

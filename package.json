@@ -9,7 +9,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check plugins/claude-code/neatcontext/src/core/companion-client.mjs && node --check plugins/claude-code/neatcontext/src/core/lite-context.mjs && node --check plugins/claude-code/neatcontext/src/core/routing.mjs && node --check plugins/claude-code/neatcontext/src/core/selection.mjs && node --check plugins/claude-code/neatcontext/src/core/session.mjs && node --check plugins/claude-code/neatcontext/src/claude/mcp-bridge.mjs && node --check plugins/claude-code/neatcontext/src/claude/neatcontext-cli.mjs && node --check plugins/claude-code/neatcontext/src/claude/session.mjs && node --check tools/diff-coverage.mjs",
+    "check:claude": "node --check plugins/claude-code/neatcontext/src/core/companion-client.mjs && node --check plugins/claude-code/neatcontext/src/core/lite-context.mjs && node --check plugins/claude-code/neatcontext/src/core/routing.mjs && node --check plugins/claude-code/neatcontext/src/core/selection.mjs && node --check plugins/claude-code/neatcontext/src/core/session.mjs && node --check plugins/claude-code/neatcontext/src/claude/mcp-bridge.mjs && node --check plugins/claude-code/neatcontext/src/claude/neatcontext-cli.mjs && node --check plugins/claude-code/neatcontext/src/claude/session.mjs",
+    "check:kimi": "node --check plugins/kimi-code/neatcontext/src/core/companion-client.mjs && node --check plugins/kimi-code/neatcontext/src/core/lite-context.mjs && node --check plugins/kimi-code/neatcontext/src/core/routing.mjs && node --check plugins/kimi-code/neatcontext/src/core/selection.mjs && node --check plugins/kimi-code/neatcontext/src/core/session.mjs && node --check plugins/kimi-code/neatcontext/src/kimi/mcp-bridge.mjs && node --check plugins/kimi-code/neatcontext/src/kimi/neatcontext-cli.mjs && node --check plugins/kimi-code/neatcontext/src/kimi/session.mjs",
+    "check": "npm run check:claude && npm run check:kimi && node --check tools/diff-coverage.mjs",
     "validate:plugin": "claude plugin validate . --strict && claude plugin validate plugins/claude-code/neatcontext --strict",
     "test": "node --test",
     "coverage": "node tools/diff-coverage.mjs"
