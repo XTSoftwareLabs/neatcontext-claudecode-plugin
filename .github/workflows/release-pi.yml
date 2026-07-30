@@ -1,0 +1,148 @@
+name: Release pi package
+
+# The pi plugin is the one host integration distributed through npm rather than
+# a marketplace manifest. pi's git source clones a repository and treats the
+# clone root as the package — it has no subpath — so `plugins/pi/neatcontext`
+# is only reachable as a published package.
+#
+# That also means this release stream versions independently of the marketplace
+# `v*` tags, which pin `.claude-plugin/marketplace.json` and move all three MCP
+# hosts together. A pi release is tagged `pi-v<version>` and touches nothing
+# else.
+#
+# To cut a release:
+#
+#   1. bump `version` in plugins/pi/neatcontext/package.json, and merge that
+#   2. git tag pi-v0.1.0 && git push origin pi-v0.1.0
+#
+# The tag must match the version in package.json; the job fails loudly rather
+# than publishing something the tag does not describe. Run the workflow by hand
+# first (dry run is the default) to rehearse the whole thing without publishing.
+#
+# Requires an `NPM_TOKEN` repository secret: an npm automation token with
+# publish rights on the @xtsoftwarelabs scope.
+
+on:
+  push:
+    tags: ["pi-v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Validate and pack without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pi-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PACKAGE_DIR: plugins/pi/neatcontext
+
+jobs:
+  release:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Creating the GitHub release that matches the tag.
+      contents: write
+      # npm provenance signs the published tarball against this workflow run.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # A dispatched run publishes only when someone explicitly unticks the dry
+      # run, so the accident-prone direction is the safe one.
+      - name: Decide what this run does
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+            && [ "${{ inputs.dry-run }}" != "false" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The tag is what people read; package.json is what npm publishes. They
+      # disagreeing is how a release ends up describing the wrong code.
+      - name: Check the tag against the package version
+        id: version
+        run: |
+          version="$(node -p "require('./$PACKAGE_DIR/package.json').version")"
+          name="$(node -p "require('./$PACKAGE_DIR/package.json').name")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tagged="${GITHUB_REF_NAME#pi-v}"
+            if [ "$tagged" != "$version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME says $tagged but $PACKAGE_DIR/package.json says $version."
+              exit 1
+            fi
+          fi
+          echo "Releasing $name@$version"
+
+      # npm would reject a duplicate anyway, but it does it after running
+      # everything below, and with a 403 that reads like an auth failure.
+      - name: Check the version is not already published
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          published="$(npm view "${{ steps.version.outputs.name }}@${{ steps.version.outputs.version }}" version 2>/dev/null || true)"
+          if [ -n "$published" ]; then
+            echo "::error::${{ steps.version.outputs.name }}@${{ steps.version.outputs.version }} is already on npm. Bump the version."
+            exit 1
+          fi
+
+      # The plugin is dependency-free — there is nothing to install here, and no
+      # lockfile to cache. These are the same gates CI runs on every pull
+      # request, repeated because a tag can point at any commit.
+      - run: npm run check
+      - run: npm test
+      - run: npm run check
+        working-directory: ${{ env.PACKAGE_DIR }}
+
+      # What actually ships. `files` in package.json is an allowlist, and this
+      # package lives inside a much larger repository, so the contents are worth
+      # printing on every release.
+      - name: Show the tarball contents
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: npm pack --dry-run
+
+      - name: Publish
+        if: steps.mode.outputs.publish == 'true'
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # `--provenance` links the tarball to this run. It needs the repository
+        # to be public and `repository.url` in package.json to match; drop the
+        # flag if npm ever rejects it.
+        run: npm publish --provenance --access public
+
+      - name: Create the GitHub release
+        if: steps.mode.outputs.publish == 'true' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ steps.version.outputs.name }}
+          REPO: ${{ github.repository }}
+        # Assembled with explicit newlines rather than a heredoc, whose
+        # terminator cannot be indented and so cannot live in a YAML block.
+        run: |
+          notes="Install with \`pi install npm:$NAME@$VERSION\`."$'\n\n'
+          notes+="See [the package README](https://github.com/$REPO/tree/$GITHUB_REF_NAME/$PACKAGE_DIR#readme)."$'\n\n'
+          notes+="This release covers the pi plugin only. The Claude Code, Codex, and Kimi Code plugins version separately, under \`v*\` tags."
+          gh release create "$GITHUB_REF_NAME" \
+            --title "NeatContext for pi $VERSION" \
+            --notes "$notes"
