@@ -324,7 +324,11 @@ test("Kimi CLI requires a safe session id and isolates routing and selection", a
 
 test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t) => {
   const companion = await startFakeCompanion();
-  t.after(() => companion.stop());
+  const sessions = [];
+  t.after(async () => {
+    await Promise.all(sessions.map((session) => session.close()));
+    await companion.stop();
+  });
   const env = { NEATCONTEXT_COMPANION_FILE: companion.discoveryFile };
   const selected = await runNode(
     cli,
@@ -335,7 +339,7 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
 
   const first = rpcSession(env);
   const second = rpcSession(env);
-  t.after(() => Promise.all([first.close(), second.close()]));
+  sessions.push(first, second);
 
   const initialized = await first.call(initialize(1));
   assert.equal(initialized.result.serverInfo.name, "neatcontext-backend");
