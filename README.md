@@ -56,13 +56,7 @@ See the [Codex marketplace README](codex-marketplace/README.md).
 
 ### pi
 
-```bash
-pi install npm:@xtsoftwarelabs/neatcontext-pi
-```
-
-See [NeatContext for pi](plugins/pi/neatcontext/README.md). pi ships no MCP, so
-this host uses a pi extension that runs inside the agent process; the commands
-use a `/neatcontext-<command>` form rather than `/neatcontext:<command>`.
+See [NeatContext for pi](plugins/pi/neatcontext/README.md).
 
 ## Quick start: reuse a complex investigation
 
