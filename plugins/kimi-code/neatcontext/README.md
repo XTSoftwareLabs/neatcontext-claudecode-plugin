@@ -27,15 +27,9 @@ In Kimi Code, run:
 
 ```text
 /plugins install https://github.com/XTSoftwareLabs/neatcontext-plugins/tree/main
-/reload
 ```
 
-Use Kimi Code 0.21.0 or newer. The plugin uses Kimi's bundled JavaScript runner,
-so a separate Node.js installation is not required.
-
-Kimi Code installs the repository-level `kimi.plugin.json`, which packages the
-isolated runtime in this directory. To test a local checkout, open `/plugins`,
-choose **Custom**, and install the absolute path to the repository root.
+Then run `/reload`
 
 ## Commands
 
