@@ -1,9 +1,25 @@
 # NeatContext for Kimi Code
 
-Save durable knowledge from Kimi Code conversations, reconnect it in later
-sessions, and route each session to the right local or desktop-backed context.
+Extract domain knowledge and preserve useful work from Kimi Code conversations
+as structured, reusable context that you can reconnect in later sessions or
+share with your team.
 
 ![NeatContext for Kimi Code demo](assets/neatcontext_kimi_code_demo.gif)
+
+## Why NeatContext?
+
+Domain knowledge is what helps Kimi Code work accurately in your environment:
+your systems, constraints, decisions, terminology, and ways of working.
+
+You naturally build that knowledge while debugging, planning, investigating
+incidents, and implementing features with Kimi Code. Those conversations contain
+discoveries that will matter again, but without a durable context they remain
+trapped in one session.
+
+NeatContext extracts the reusable knowledge from that work and saves it as a
+structured context. Reconnect it when you return to the domain so Kimi Code can
+start with the knowledge it needs, or share it with teammates so everyone
+benefits from what one person learned.
 
 ## Install
 

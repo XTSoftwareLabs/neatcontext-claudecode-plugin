@@ -219,6 +219,11 @@ test("Kimi manifests describe both repository and isolated package installs", as
     kimiReadme,
     /!\[NeatContext for Kimi Code demo\]\(assets\/neatcontext_kimi_code_demo\.gif\)/
   );
+  assert.match(kimiReadme, /^## Why NeatContext\?$/m);
+  assert.match(
+    kimiReadme,
+    /Extract domain knowledge and preserve useful work from Kimi Code conversations/
+  );
   assert.ok(
     (await stat(path.join(pluginRoot, "assets", "neatcontext_kimi_code_demo.gif"))).isFile()
   );
