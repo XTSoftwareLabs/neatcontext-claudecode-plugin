@@ -1,13 +1,13 @@
-# NeatContext for Claude Code
+# NeatContext plugins
 
 [![CI](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/XTSoftwareLabs/neatcontext-plugins/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/package-json/v/XTSoftwareLabs/neatcontext-plugins)](package.json)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/github/license/XTSoftwareLabs/neatcontext-plugins)](LICENSE)
 
-Extract domain knowledge and save useful work from a Claude Code conversation
-as structured, reusable context that you can use in later sessions or share
-with others.
+Extract domain knowledge and save useful work from Claude Code, Kimi Code, or
+Codex conversations as structured, reusable context that you can use in later
+sessions or share with others.
 
 <p>
   <a href="https://www.youtube.com/watch?v=p3x5Pxw3XBE">
@@ -25,24 +25,36 @@ with others.
 Domain knowledge is what helps an LLM answer accurately for your team—your
 systems, constraints, decisions, terminology, and ways of working.
 
-You naturally build that knowledge while doing hard work with Claude. Long
-conversations about debugging, planning, incidents, and implementation already
-contain discoveries that will matter again. NeatContext extracts the durable
-knowledge from those conversations and saves it as a structured context.
+You naturally build that knowledge while doing hard work with a coding agent.
+Long conversations about debugging, planning, incidents, and implementation
+already contain discoveries that will matter again. NeatContext extracts the
+durable knowledge from those conversations and saves it as a structured context.
 
-Connect that context in a new session or during later work, and Claude can start
-with the knowledge it needs instead of asking you to explain everything again.
-You can also share the context with teammates, so the whole team benefits from
-what one person learned.
+Connect that context in a new session or during later work, and the coding agent
+can start with the knowledge it needs instead of asking you to explain everything
+again. You can also share the context with teammates, so the whole team benefits
+from what one person learned.
 
 ## Install
+
+### Claude Code
 
 ```bash
 claude plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
 claude plugin install neatcontext@neatcontext --scope user
 ```
 
+### Kimi Code
+
+See [NeatContext for Kimi Code](plugins/kimi-code/neatcontext/README.md).
+
+### Codex
+
+See the [Codex marketplace README](codex-marketplace/README.md).
+
 ## Quick start: reuse a complex investigation
+
+The walkthrough below uses Claude Code.
 
 Suppose you work through a difficult production issue with Claude:
 
@@ -234,19 +246,19 @@ app installed and open while using a standard context.
 
 - See the [Privacy Policy](PRIVACY.md) for the complete description of local
   storage, network communication, retention, and deletion.
-- The plugin runs only the Node.js files bundled in this repository. Its desktop
-  integration connects to the NeatContext companion service on `127.0.0.1`; the
-  plugin itself makes no outbound internet requests.
+- The host plugins run only the Node.js files bundled in this repository. Their
+  desktop integration connects to the NeatContext companion service on
+  `127.0.0.1`; the plugins themselves make no outbound internet requests.
 - Lite contexts are stored locally under `~/.neatcontext/lite`. Saving or
   updating from a conversation first creates a gitignored
   `.neatcontext-capture-*.json` scratch file in the current project and removes
   it after a successful save.
 - A connected context's profile and selected knowledge files are read into the
-  Claude Code session when Claude uses them. They are then handled like other
-  content supplied to Claude Code. Standard-context extension tools may contact
-  services configured separately in NeatContext.
+  active coding session when its model uses them. They are then handled like
+  other content supplied to that coding host. Standard-context extension tools
+  may contact services configured separately in NeatContext.
 - Import only bundles you trust. Their profile and Markdown knowledge become
-  instructions and source material available to Claude.
+  instructions and source material available to the active model.
 - Creating or updating a lite context never overwrites an external knowledge
   folder referenced by `/neatcontext:create`. Deleting a lite context always
   requires confirmation and removes its bundle-local generated knowledge.

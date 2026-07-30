@@ -21,10 +21,10 @@ Thanks for helping improve the NeatContext host integrations.
 The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 
 ```bash
-npm run check           # node --check on each helper script
+npm run check           # node --check on each host helper script
 npm run validate:plugin # Claude Code marketplace validation, warnings included
-npm test                # node --test against a fake companion API
-npm run coverage        # every changed plugin source line must be run by a test
+npm test                # host integration tests against a fake companion API
+npm run coverage        # every changed Claude-plugin source line must run in a test
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm run check` and `npm test` on every
@@ -37,20 +37,21 @@ single required check is `ci`, which passes only when every CI job did.
 ## Diff coverage
 
 `npm run coverage` runs the suite and fails if any line the branch adds or
-changes under a plugin's `src/` directory was never executed. Whole-file
-coverage is not the bar — much of this code predates the tests — but new code
-has to arrive with a test that runs it.
+changes under the Claude plugin's `src/` directory was never executed.
+Whole-file coverage is not the bar — much of this code predates the tests — but
+new code has to arrive with a test that runs it. Other isolated host packages
+have their own integration tests in the repository suite.
 
-Almost everything here is exercised the way Claude Code exercises it: the MCP
-bridge and the CLI are spawned as child processes, which `node --test
+Almost everything here is exercised the way the coding hosts exercise it: the
+MCP bridges and CLIs are spawned as child processes, which `node --test
 --experimental-test-coverage` cannot see into. So `tools/diff-coverage.mjs` sets
 `NODE_V8_COVERAGE`, which every child inherits, and merges what the whole
 process tree wrote. A line counts as covered if any one process ran it.
 
 That only works when those children exit on their own — a killed process never
 flushes its profile. Tests end a bridge session by closing its stdin
-(`closeSession` in `tests/fake-companion.mjs`), which is what Claude Code does
-too; don't swap it back for `child.kill()`.
+(`closeSession` in `tests/fake-companion.mjs`), which is how the hosts shut down
+stdio MCP servers too; don't swap it back for `child.kill()`.
 
 The gate reads `git diff`, which does not see **untracked** files. A brand-new
 script is invisible to it — and so trivially "passes" — until you `git add` it.
@@ -67,23 +68,32 @@ The runtime is split at the host boundary:
 ```text
 .claude-plugin/
 └── marketplace.json                repository-level Claude marketplace catalog
+kimi.plugin.json                    repository-level Kimi Code plugin manifest
 plugins/
-└── claude-code/
-    └── neatcontext/                complete installable Claude plugin
-        ├── .claude-plugin/
-        │   └── plugin.json
-        ├── commands/               Claude Code slash-command definitions
+├── claude-code/
+│   └── neatcontext/                complete installable Claude plugin
+│       ├── .claude-plugin/
+│       │   └── plugin.json
+│       ├── commands/               Claude Code slash-command definitions
+│       └── src/
+│           ├── core/               reusable storage, selection, and routing logic
+│           └── claude/             Claude process entry points and session adapter
+└── kimi-code/
+    └── neatcontext/                complete installable Kimi Code plugin
+        ├── kimi.plugin.json
+        ├── commands/               Kimi Code slash-command definitions
+        ├── skills/                 workflows plus session-start guidance
         └── src/
-            ├── core/               reusable storage, selection, and routing logic
-            └── claude/             Claude process entry points and session adapter
-tests/                              core and Claude integration coverage
+            ├── core/               packaged copy of the reusable runtime
+            └── kimi/               Kimi process entry points and session adapter
+tests/                              core and host integration coverage
 tools/                              development and end-to-end utilities
 ```
 
-The Claude plugin's `src/core/` must not import from `src/claude/` or read
-host-specific environment variables. Host integrations provide session
-identity through `configureSessionId` in `src/core/session.mjs`, then call the
-core operations. Keep host wording, command conventions, manifests, and process
-startup in the host directory. An installed plugin cannot reach outside its
-own directory, so any shared source must be packaged into each host plugin at
-release time.
+Each host plugin's `src/core/` must not import from its host directory or read
+host-specific environment variables. Host integrations provide session identity
+through `configureSessionId` in `src/core/session.mjs`, then call the core
+operations. Keep host wording, command conventions, manifests, and process
+startup in the host directory. An installed plugin cannot reach outside its own
+directory, so any shared source must be packaged into each host plugin at release
+time.

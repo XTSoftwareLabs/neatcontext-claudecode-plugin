@@ -74,7 +74,7 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   assert.match(readme, /^## Security and data handling$/m);
   assert.match(readme, /\[Privacy Policy\]\(PRIVACY\.md\)/);
   assert.match(privacy, /^# Privacy Policy$/m);
-  assert.match(privacy, /does not send telemetry, analytics, crash reports/);
+  assert.match(privacy, /do not send telemetry, analytics, crash reports/);
 });
 
 test("commands pre-approve only the bundled CLI and never interpolate arguments into shell", async () => {
