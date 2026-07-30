@@ -1,0 +1,52 @@
+{
+  "name": "@xtsoftwarelabs/neatcontext-pi",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Save pi work as reusable, domain-aware context",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "neatcontext",
+    "context",
+    "knowledge-management",
+    "grounding"
+  ],
+  "author": {
+    "name": "XTSoftwareLabs",
+    "url": "https://github.com/XTSoftwareLabs"
+  },
+  "homepage": "https://github.com/XTSoftwareLabs/neatcontext-plugins/tree/main/plugins/pi/neatcontext#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XTSoftwareLabs/neatcontext-plugins.git",
+    "directory": "plugins/pi/neatcontext"
+  },
+  "bugs": {
+    "url": "https://github.com/XTSoftwareLabs/neatcontext-plugins/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "files": [
+    "extensions",
+    "skills",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "check": "node --check extensions/neatcontext.js && node --check src/pi/runtime.mjs && node --check src/pi/session.mjs && node --check src/core/companion-client.mjs && node --check src/core/lite-context.mjs && node --check src/core/routing.mjs && node --check src/core/selection.mjs && node --check src/core/session.mjs",
+    "test": "node --test"
+  }
+}
