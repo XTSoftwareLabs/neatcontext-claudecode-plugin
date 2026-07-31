@@ -8,8 +8,12 @@
 // documented companion HTTP contract.
 //
 // Behaviors layered on top of a plain relay:
-//   * initialize advertises tools.listChanged, and we poll the connected-context
-//     version so the host refreshes its tool list when you use /neatcontext:use.
+//   * initialize advertises tools.listChanged. A fs.watch on the plugin-sessions
+//     directory fires a version check the moment /neatcontext:use (or any other
+//     CLI command) writes a selection, so the host refreshes its tool list
+//     immediately instead of waiting on a poll. A slow interval remains only as
+//     a backstop for out-of-band changes made in the desktop app, or for the
+//     brief window before the sessions directory exists to watch.
 //   * NeatContext keeps its connected context in memory only, so restarting the
 //     app drops it. Before anything that depends on the context, and on every
 //     poll, we put the remembered selection back — otherwise a session that ran
@@ -31,7 +35,9 @@
 // answered locally — no HTTP, no app, so it keeps working with NeatContext
 // closed or never installed.
 
+import { watch } from "node:fs";
 import readline from "node:readline";
+import path from "node:path";
 import {
   bindKimiSessionId,
   isKimiSessionBound,
@@ -39,6 +45,7 @@ import {
 } from "./session.mjs";
 import {
   clientFor,
+  discoveryFilePath,
   ensureConnection,
   readDiscovery,
   readSelection,
@@ -828,18 +835,60 @@ async function withRoutingTools(response) {
   };
 }
 
+// Backstop only: the fs.watch below reacts to a written selection within
+// milliseconds. This interval exists solely for changes the watch cannot see —
+// a connection made directly in the desktop app — and for the (usually brief)
+// window before the sessions directory exists to watch at all.
+const FALLBACK_POLL_MS = 15000;
+
+async function checkVersion() {
+  if (!started) return;
+  const version = await currentVersion();
+  if (version !== null && version !== lastVersion) {
+    lastVersion = version;
+    writeLine({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+  }
+}
+
+// Every session's selection file lives in this one directory
+// (`plugin-sessions/<sessionId>.json`), so watching it — rather than the one
+// file this bridge's own session will eventually own — covers the id becoming
+// bound after this watch is set up, with no extra bookkeeping. A change to
+// another session's file just costs one harmless local version check.
+let selectionWatcher = null;
+function ensureSelectionWatch() {
+  if (selectionWatcher) return;
+  try {
+    selectionWatcher = watch(
+      path.join(path.dirname(discoveryFilePath()), "plugin-sessions"),
+      { persistent: false },
+      () => {
+        checkVersion().catch(() => {});
+      }
+    );
+    selectionWatcher.unref?.();
+    selectionWatcher.on("error", () => {
+      // Directory removed, or some other watch failure: fall back to polling
+      // until the next backstop tick re-establishes the watch.
+      selectionWatcher = null;
+    });
+  } catch {
+    // Sessions directory does not exist yet (no CLI command has run since the
+    // companion's home directory was created). The backstop poll retries this
+    // on its own interval.
+    selectionWatcher = null;
+  }
+}
+
 let watching = false;
 function startVersionWatch() {
   if (watching) return;
   watching = true;
-  setInterval(async () => {
-    if (!started) return;
-    const version = await currentVersion();
-    if (version !== null && version !== lastVersion) {
-      lastVersion = version;
-      writeLine({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
-    }
-  }, 1500).unref?.();
+  ensureSelectionWatch();
+  setInterval(() => {
+    ensureSelectionWatch();
+    checkVersion().catch(() => {});
+  }, FALLBACK_POLL_MS).unref?.();
 }
 
 function main() {
