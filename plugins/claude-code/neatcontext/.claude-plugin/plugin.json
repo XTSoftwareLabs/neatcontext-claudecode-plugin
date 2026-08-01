@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "neatcontext",
   "displayName": "NeatContext",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Save Claude Code work as reusable, domain-aware context",
   "author": {
     "name": "XTSoftwareLabs",
@@ -12,6 +12,7 @@
   "repository": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
   "license": "MIT",
   "keywords": ["neatcontext", "context", "knowledge-management", "grounding", "mcp"],
+  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "neatcontext": {
       "command": "node",

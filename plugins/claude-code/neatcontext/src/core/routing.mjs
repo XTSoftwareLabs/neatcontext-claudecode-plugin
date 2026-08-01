@@ -107,6 +107,13 @@ async function update(mutate) {
   return result;
 }
 
+// The read-mutate-write cycle, for state this module does not interpret. The
+// save nudge keeps its counters inside `sessions[id].save` — same file, same
+// session cap, same 0600 — without this module having to know their shape.
+export function updateRouting(mutate) {
+  return update(mutate);
+}
+
 // --- cards -------------------------------------------------------------------
 
 // `source` is the text the line was derived from — the domain profile for a lite

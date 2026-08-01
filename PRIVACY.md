@@ -43,6 +43,18 @@ The plugins handle information only when needed to provide their features:
 - **Desktop companion connection details:** the local port and bearer token
   written by the NeatContext desktop app. The active plugin reads these details
   to authenticate requests to the loopback companion service.
+- **Save-nudge counters (Claude Code only):** to detect a good moment to
+  *offer* saving, a hook scans newly appended lines of the host's own session
+  transcript once per assistant turn and retains only this whitelist: tool
+  names, whether a tool call reported an error, the first words of shell
+  commands (for example `git commit`), 16-character hashes of edited file
+  paths, message token counts, the transcript's size in bytes, and whether a
+  fixed proposal marker line appeared. Message text, command arguments, file
+  contents, and file paths are never stored or transmitted; everything outside
+  the whitelist is discarded as soon as the line is read. The counters are
+  kept in the local routing state file and the nudge only ever asks — a save
+  still happens exclusively through the save command's preview-and-confirm
+  flow. Setting the routing mode to `manual` disables the nudge.
 
 The plugins do not intentionally collect account credentials, payment
 information, advertising identifiers, or precise location information.
