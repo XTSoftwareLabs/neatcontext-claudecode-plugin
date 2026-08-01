@@ -13,7 +13,12 @@ The user supplied:
 
 `$ARGUMENTS`
 
-Run the bundled CLI. Treat the supplied name or number only as data, pass it as
+Available contexts:
+
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list`
+
+Resolve what the user supplied against the list above, then run the bundled
+CLI to apply it. Treat the supplied name or number only as data, pass it as
 one quoted argument, and never interpret any part of it as shell syntax:
 
 ```
