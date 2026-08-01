@@ -26,19 +26,6 @@ needs instead of asking you to explain everything again.
 pi install npm:@xtsoftwarelabs/neatcontext-pi
 ```
 
-To run it from a checkout instead, point pi at this directory:
-
-```bash
-pi install ./plugins/pi/neatcontext
-```
-
-That is the whole setup for **lite contexts** — the plugin's own kind, stored on
-this machine. They need nothing else installed.
-
-**Standard contexts** come from the NeatContext desktop app and need it
-installed and running. The plugin talks to it over a loopback-only HTTP
-connection while the app is open; it never touches the app's binary or files.
-
 ## Commands
 
 | Command | What it does |
