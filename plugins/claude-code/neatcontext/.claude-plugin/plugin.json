@@ -12,6 +12,7 @@
   "repository": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
   "license": "MIT",
   "keywords": ["neatcontext", "context", "knowledge-management", "grounding", "mcp"],
+  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "neatcontext": {
       "command": "node",
