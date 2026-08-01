@@ -70,7 +70,7 @@ import {
 } from "../core/routing.mjs";
 import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
 
-const SERVER_INFO = { name: "neatcontext", version: "0.3.0" };
+const SERVER_INFO = { name: "neatcontext", version: "0.2.5" };
 const BIND_SESSION_TOOL = {
   name: "bind_session",
   title: "Bind Kimi Session",

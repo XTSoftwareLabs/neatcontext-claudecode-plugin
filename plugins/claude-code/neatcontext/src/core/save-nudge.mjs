@@ -110,10 +110,17 @@ export function normalizeSaveState(raw) {
   return clean;
 }
 
-const firstTokens = (command) => {
-  const tokens = String(command ?? "").trim().split(/\s+/);
-  return { first: tokens[0] ?? "", second: tokens[1] ?? "", third: tokens[2] ?? "" };
-};
+// A Bash call is routinely a compound — `git add x && git commit -m y` — and
+// the commit is rarely the first segment. Each segment is a command, so each
+// contributes its first words; nothing past them is read.
+const commandHeads = (command) =>
+  String(command ?? "")
+    .split(/&&|\|\||;|\|/)
+    .map((segment) => {
+      const tokens = segment.trim().split(/\s+/);
+      return { first: tokens[0] ?? "", second: tokens[1] ?? "", third: tokens[2] ?? "" };
+    })
+    .filter((head) => head.first.length > 0);
 
 function notePending(save, id, record) {
   const keys = Object.keys(save.pending);
@@ -163,12 +170,15 @@ function ingestEntry(save, entry) {
         continue;
       }
       if (block.name === "Bash" && typeof block.id === "string") {
-        const { first, second, third } = firstTokens(block.input?.command);
-        if (!BUILD_TOKENS.has(first)) continue;
-        const commitish =
-          (first === "git" && second === "commit") ||
-          (first === "gh" && second === "pr" && third === "create");
-        notePending(save, block.id, { token: first, commitish });
+        const heads = commandHeads(block.input?.command);
+        const tokens = [...new Set(heads.map((head) => head.first).filter((first) => BUILD_TOKENS.has(first)))];
+        if (tokens.length === 0) continue;
+        const commitish = heads.some(
+          (head) =>
+            (head.first === "git" && head.second === "commit") ||
+            (head.first === "gh" && head.second === "pr" && head.third === "create")
+        );
+        notePending(save, block.id, { tokens, commitish });
       }
     }
     return markerSeen;
@@ -179,14 +189,18 @@ function ingestEntry(save, entry) {
       const record = save.pending[block.tool_use_id];
       if (!record) continue;
       delete save.pending[block.tool_use_id];
+      // Older state stored a single token; read both shapes.
+      const tokens = Array.isArray(record.tokens) ? record.tokens : [record.token].filter(Boolean);
       if (block.is_error === true) {
         save.buildRed = true;
-        if (!save.redTokens.includes(record.token)) {
-          save.redTokens.push(record.token);
+        for (const token of tokens) {
+          if (!save.redTokens.includes(token)) {
+            save.redTokens.push(token);
+          }
         }
       } else {
         save.buildRed = false;
-        if (save.redTokens.includes(record.token)) {
+        if (tokens.some((token) => save.redTokens.includes(token))) {
           save.redGreen = true;
         }
         if (record.commitish) {

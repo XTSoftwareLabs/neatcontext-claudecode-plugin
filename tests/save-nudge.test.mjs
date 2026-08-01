@@ -261,6 +261,20 @@ describe("ingesting the transcript delta", () => {
     assert.equal(save.redGreen, true);
   });
 
+  // Found live: models routinely commit as `git add x && git commit -m y`,
+  // and the commit is never the first segment of that compound.
+  it("sees a commit buried in a compound command", () => {
+    const save = emptySaveState();
+    ingestTranscriptText(
+      save,
+      [
+        assistantLine([toolUse("Bash", { command: "git add notes.txt && git commit -m add-notes" }, "b1")]),
+        resultLine("b1")
+      ].join("\n")
+    );
+    assert.equal(save.commitLanded, true);
+  });
+
   it("treats only build-shaped commands as mid-flight when they fail", () => {
     const save = emptySaveState();
     // A grep exiting non-zero is a normal answer, not a broken build.
@@ -296,6 +310,20 @@ describe("ingesting the transcript delta", () => {
 
     const awaiting = { ...emptySaveState(), awaitingMarker: true };
     assert.equal(ingestTranscriptText(awaiting, line), true);
+  });
+
+  it("caps the pending-tool map by evicting the oldest entry", () => {
+    const save = emptySaveState();
+    const flood = [];
+    for (let i = 0; i < SAVE_NUDGE.maxPendingTools + 1; i++) {
+      flood.push(assistantLine([toolUse("Bash", { command: `npm run task-${i}` }, `b${i}`)]));
+    }
+    ingestTranscriptText(save, flood.join("\n"));
+    assert.equal(Object.keys(save.pending).length, SAVE_NUDGE.maxPendingTools);
+    assert.equal(save.pending.b0, undefined, "the oldest waiter is the one evicted");
+    // The evicted call's late result is silently ignored, not miscounted.
+    ingestTranscriptText(save, resultLine("b0", true));
+    assert.equal(save.buildRed, false);
   });
 
   it("survives garbage lines and unknown shapes", () => {
