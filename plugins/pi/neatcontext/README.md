@@ -79,7 +79,7 @@ process. Three consequences worth knowing:
 ## Privacy
 
 The plugin stores contexts under `~/.neatcontext/` on your machine and talks to
-the NeatContext desktop app only over `127.0.0.1` while that app is open. It
+the NeatContext desktop app only over `127.0.0.1` if that app is installed and open. It
 sends nothing anywhere else. See
 [PRIVACY.md](https://github.com/XTSoftwareLabs/neatcontext-plugins/blob/main/PRIVACY.md).
 
