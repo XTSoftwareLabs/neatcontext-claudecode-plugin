@@ -312,16 +312,20 @@ export function noteSaved(id) {
 // itself stays behind /neatcontext:save with its preview-and-confirm, run by
 // the user. Silence is explicitly permitted — without it the false-positive
 // rate would be unmanageable.
+//
+// Kept short on purpose, and it is two audiences at once. The host echoes this
+// text into the terminal alongside the hook's own error line, so every word
+// costs the user something to skim; and an ask that arrives unrequested has to
+// earn its space. Hence the hard cap: a headline, three one-line items, the
+// choices. The model's reasoning about whether to fire is not part of the ask.
 export function proposalInstruction({ reasons, liteConnectedName = null }) {
   const target = liteConnectedName
-    ? `update "${liteConnectedName}" by running /neatcontext:save, save as a new context with /neatcontext:save <new name>`
-    : "save it as a new context by running /neatcontext:save <name>";
+    ? `update "${liteConnectedName}" with /neatcontext:save, a new one with /neatcontext:save <name>`
+    : "/neatcontext:save <name>";
   return [
     `NeatContext save check (automatic, at most once per session). Signals: ${reasons.join("; ")}.`,
-    "Decide whether THIS conversation produced durable knowledge a future session would reuse — root causes found, decisions made and why, designs agreed, commands verified.",
-    `- If it did: ask the user, opening with the exact line "${PROPOSAL_MARKER}" followed by up to three concrete items from this session that would be saved. Name the actual findings, files, or decisions — never generic benefits of saving. Close with the choices: ${target}, or reply "not now".`,
-    "- Saving is the user's action. Never run a save, never write context files, never invoke commands for them.",
-    "- If nothing here is durable (routine edits, exploration, sensitive material), do not mention saving or this check at all — reply with one short closing line and stop.",
-    '- If the user answers "not now", drop the subject for the rest of the session.'
+    `Durable knowledge a future session would reuse? If yes, ask in at most five lines: the exact line "${PROPOSAL_MARKER}", then up to three concrete items, one short line each, naming a real finding, file, or decision. No preamble, no reasoning. Close with: ${target}, or "not now".`,
+    "If not, do not mention saving or this check at all — one short closing line and stop.",
+    'Never run a save for the user. If they answer "not now", drop it for the session.'
   ].join("\n");
 }

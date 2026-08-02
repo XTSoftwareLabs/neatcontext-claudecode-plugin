@@ -215,12 +215,29 @@ describe("proposalInstruction", () => {
     assert.match(text, /\/neatcontext:save <name>/);
   });
 
+  // The host prints this text in the terminal next to the hook's error line,
+  // so it is user-facing whether or not it was written to be. An instruction
+  // that sprawls produces an ask that sprawls, and the ask was not requested.
+  it("caps the ask and stays short enough to sit in a terminal", () => {
+    const text = proposalInstruction({
+      reasons: ["a commit or pull request just landed", "the conversation is approaching auto-compaction"]
+    });
+    assert.match(text, /at most five lines/);
+    assert.match(text, /one short line each/);
+    assert.match(text, /No preamble, no reasoning/);
+    assert.ok(
+      text.split("\n").length <= 4,
+      `the instruction itself must stay within four lines, got ${text.split("\n").length}`
+    );
+    assert.ok(text.length <= 700, `the instruction must stay terse, got ${text.length} characters`);
+  });
+
   it("offers updating the connected context by name", () => {
     const text = proposalInstruction({
       reasons: ["x"],
       liteConnectedName: "INC-1001 checkout-api pool exhaustion"
     });
-    assert.match(text, /update "INC-1001 checkout-api pool exhaustion" by running \/neatcontext:save/);
+    assert.match(text, /update "INC-1001 checkout-api pool exhaustion" with \/neatcontext:save/);
   });
 });
 
@@ -366,7 +383,7 @@ describe("the Stop hook", () => {
     await connectLite("s-lite");
     const transcript = await writeTranscript(commitLines);
     const { out } = await stop("s-lite", transcript);
-    assert.match(JSON.parse(out).reason, /update "Payments Runbooks" by running \/neatcontext:save/);
+    assert.match(JSON.parse(out).reason, /update "Payments Runbooks" with \/neatcontext:save/);
   });
 
   it("stays quiet with nothing worth proposing", async () => {
