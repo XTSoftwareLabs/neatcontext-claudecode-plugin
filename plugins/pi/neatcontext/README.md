@@ -56,26 +56,6 @@ Decline a switch once and it will not be suggested again in that session. When
 routing gets it wrong, say what you call the subject — the model records that as
 an alias so the same words route correctly next time.
 
-## How it differs from the other hosts
-
-pi has no built-in MCP, [by design](https://github.com/earendil-works/pi/issues/563).
-The other three NeatContext plugins ship an MCP server that the host launches
-beside the agent; this one is a pi extension that runs *inside* the agent
-process. Three consequences worth knowing:
-
-- **Session identity is exact.** `ctx.sessionManager.getSessionId()` is
-  available directly, so per-session isolation needs none of the environment
-  plumbing the other hosts require.
-- **Grounding is rebuilt every turn.** MCP fixes its session instructions at the
-  handshake and can never revise them. Here they are recomputed in
-  `before_agent_start`, so a context switch or a mode change takes effect on the
-  next message rather than the next restart.
-- **The tool list is fixed for the session.** MCP hosts add and remove tools live.
-  pi cannot, so `use_context` stays registered and *refuses* in manual mode
-  instead of disappearing, and a standard context's extension tools are reached
-  through one `neatcontext_tool` proxy rather than being registered one-for-one.
-  The user-visible behavior is the same; the token cost is lower.
-
 ## Privacy
 
 The plugin stores contexts under `~/.neatcontext/` on your machine and talks to
