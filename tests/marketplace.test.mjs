@@ -114,6 +114,37 @@ test("commands pre-approve only the bundled CLI and never interpolate arguments 
   }
 });
 
+// Exec form is not a style preference. Without `args`, Claude Code runs the
+// command through a shell — bash on POSIX, and PowerShell on Windows without
+// Git Bash, which costs ~520 ms of interpreter startup on every turn the Stop
+// hook fires. Exec form also keeps the plugin path away from a shell parser.
+test("plugin hooks spawn without a shell", async () => {
+  const hooks = JSON.parse(await read(`${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json`));
+  const entries = Object.entries(hooks.hooks);
+  assert.deepEqual(
+    entries.map(([event]) => event).sort(),
+    ["PreCompact", "Stop"],
+    "hooks.json must register exactly the Stop and PreCompact events"
+  );
+
+  for (const [event, matchers] of entries) {
+    for (const hook of matchers.flatMap((matcher) => matcher.hooks)) {
+      assert.equal(hook.type, "command", `${event} hook must be a command hook`);
+      assert.equal(hook.command, "node", `${event} hook must exec node directly, not via a shell`);
+      assert.ok(Array.isArray(hook.args), `${event} hook must pass its script in args (exec form)`);
+      assert.equal(hook.args.length, 1, `${event} hook takes exactly one script argument`);
+
+      // The placeholder is substituted per-element by the host, so the entry
+      // must be exactly that and nothing a shell would need to unquote.
+      const [script] = hook.args;
+      const prefix = "${CLAUDE_PLUGIN_ROOT}/";
+      assert.ok(script.startsWith(prefix), `${event} hook script must be plugin-root relative`);
+      assert.doesNotMatch(script, /["'`]/, `${event} hook script must carry no quoting`);
+      await read(`${CLAUDE_PLUGIN_ROOT}/${script.slice(prefix.length)}`);
+    }
+  }
+});
+
 test("commands with side effects can only be invoked explicitly by the user", async () => {
   for (const name of USER_ONLY_COMMANDS) {
     const file = `${CLAUDE_PLUGIN_ROOT}/commands/${name}.md`;
