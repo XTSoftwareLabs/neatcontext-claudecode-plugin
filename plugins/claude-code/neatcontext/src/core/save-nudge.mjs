@@ -313,19 +313,20 @@ export function noteSaved(id) {
 // the user. Silence is explicitly permitted — without it the false-positive
 // rate would be unmanageable.
 //
-// Kept short on purpose, and it is two audiences at once. The host echoes this
-// text into the terminal alongside the hook's own error line, so every word
-// costs the user something to skim; and an ask that arrives unrequested has to
-// earn its space. Hence the hard cap: a headline, three one-line items, the
-// choices. The model's reasoning about whether to fire is not part of the ask.
+// Kept short on purpose. This text itself reaches only the model (the host
+// stores the block reason in the transcript unrendered), but the ask it
+// produces is user-facing, and an ask that arrives unrequested has to earn
+// its space. Hence the hard cap: a headline, three terse items, the choices —
+// and none of the model's reasoning about whether to fire. The ask is a hint,
+// not a question owed an answer: ignoring it must cost the user nothing.
 export function proposalInstruction({ reasons, liteConnectedName = null }) {
   const target = liteConnectedName
     ? `update "${liteConnectedName}" with /neatcontext:save, a new one with /neatcontext:save <name>`
     : "/neatcontext:save <name>";
   return [
     `NeatContext save check (automatic, at most once per session). Signals: ${reasons.join("; ")}.`,
-    `Durable knowledge a future session would reuse? If yes, ask in at most five lines: the exact line "${PROPOSAL_MARKER}", then up to three concrete items, one short line each, naming a real finding, file, or decision. No preamble, no reasoning. Close with: ${target}, or "not now".`,
+    `Durable knowledge a future session would reuse? If yes, ask in at most five lines: the exact line "${PROPOSAL_MARKER}", then up to three reasons worth saving — one terse sentence each, naming a real finding, file, or decision. Output nothing else: no reasoning, no paragraphs, no explanation of this check. Close with: ${target}, or "not now".`,
     "If not, do not mention saving or this check at all — one short closing line and stop.",
-    'Never run a save for the user. If they answer "not now", drop it for the session.'
+    'The ask is a hint, not a question needing an answer: never wait on it, never repeat it, never run a save for the user. Whether they decline or simply ignore it, drop the subject for the session.'
   ].join("\n");
 }

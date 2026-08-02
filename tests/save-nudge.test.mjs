@@ -209,27 +209,30 @@ describe("proposalInstruction", () => {
   it("demands the marker, concrete items, and permits silence", () => {
     const text = proposalInstruction({ reasons: ["a commit or pull request just landed"] });
     assert.match(text, new RegExp(PROPOSAL_MARKER.replace("?", "\\?")));
-    assert.match(text, /up to three concrete items/);
+    assert.match(text, /up to three reasons/);
     assert.match(text, /do not mention saving or this check at all/);
-    assert.match(text, /Never run a save/);
+    assert.match(text, /never run a save/);
     assert.match(text, /\/neatcontext:save <name>/);
   });
 
-  // The host prints this text in the terminal next to the hook's error line,
-  // so it is user-facing whether or not it was written to be. An instruction
-  // that sprawls produces an ask that sprawls, and the ask was not requested.
-  it("caps the ask and stays short enough to sit in a terminal", () => {
+  // An instruction that sprawls produces an ask that sprawls, and the ask was
+  // not requested. The cap is the contract: a headline, up to three terse
+  // reasons, the choices — and it binds as a hint, never a blocking question.
+  it("caps the ask, forbids reasoning, and binds as a hint", () => {
     const text = proposalInstruction({
       reasons: ["a commit or pull request just landed", "the conversation is approaching auto-compaction"]
     });
     assert.match(text, /at most five lines/);
-    assert.match(text, /one short line each/);
-    assert.match(text, /No preamble, no reasoning/);
+    assert.match(text, /up to three reasons/);
+    assert.match(text, /one terse sentence each/);
+    assert.match(text, /no reasoning, no paragraphs/);
+    assert.match(text, /never wait on it, never repeat it/);
+    assert.match(text, /decline or simply ignore it/);
     assert.ok(
       text.split("\n").length <= 4,
       `the instruction itself must stay within four lines, got ${text.split("\n").length}`
     );
-    assert.ok(text.length <= 700, `the instruction must stay terse, got ${text.length} characters`);
+    assert.ok(text.length <= 900, `the instruction must stay terse, got ${text.length} characters`);
   });
 
   it("offers updating the connected context by name", () => {
