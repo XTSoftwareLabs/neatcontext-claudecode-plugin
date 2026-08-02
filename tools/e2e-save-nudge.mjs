@@ -13,6 +13,11 @@
 //      whitelist ingestion reads.
 //   4. The shipped hooks, wired end to end, record a fire and deliver the ask
 //      in a session that edits a file and commits.
+//   5. The exec form the manifest uses (`command: node`, script in `args`)
+//      still delivers the payload on stdin, and passes arguments without a
+//      shell in between.
+//   6. Installed as a real plugin, ${CLAUDE_PLUGIN_ROOT} resolves inside
+//      `args` and the hook actually runs.
 //
 // Local-only, deliberately not named *.test.mjs: it needs an authenticated
 // claude CLI and spends a few small model calls. Run it by hand before a
@@ -20,7 +25,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -253,10 +258,19 @@ async function liveFeature(root) {
     .map((session) => session.save)
     .filter(Boolean);
   const fired = saves.find((save) => save.fires >= 1);
+  // Not `awaitingMarker === true`: that only holds when the session happens to
+  // end on the firing turn. If the model answers and stops again, the next Stop
+  // resolves the fire — proposed or silent — and clears the flag. Both endings
+  // are correct, so the fire is asserted here and its delivery two checks down.
+  const resolved = (routing.decisions ?? []).some(
+    (entry) => entry.kind === "save-nudge" && ["proposed", "silent"].includes(entry.outcome)
+  );
   record(
     "the shipped Stop hook counted the session and fired once",
-    Boolean(fired) && fired.writes >= 1 && fired.awaitingMarker === true,
-    fired ? `fires=${fired.fires} writes=${fired.writes} turns=${fired.turns}` : `sessions=${saves.length}; ${err.trim().slice(-120)}`
+    Boolean(fired) && fired.writes >= 1 && (fired.awaitingMarker === true || resolved),
+    fired
+      ? `fires=${fired.fires} writes=${fired.writes} turns=${fired.turns} awaiting=${fired.awaitingMarker}`
+      : `sessions=${saves.length}; ${err.trim().slice(-120)}`
   );
   record(
     "the fire and its signals landed in the decisions log",
@@ -314,6 +328,150 @@ appendFileSync(${JSON.stringify(log)}, raw.replace(/\\n/g, " ") + "\\n");
   }
 }
 
+// --- phase 4: the exec form the manifest ships ----------------------------------
+
+async function probeExecForm(root) {
+  const dir = path.join(root, "execform");
+  const log = path.join(dir, "execform-log.jsonl");
+  await mkdir(dir, { recursive: true });
+
+  const probe = path.join(dir, "probe-exec.mjs");
+  await writeFile(
+    probe,
+    `import { appendFileSync } from "node:fs";
+let raw = "";
+for await (const chunk of process.stdin) raw += chunk;
+const input = JSON.parse(raw);
+appendFileSync(${JSON.stringify(log)}, JSON.stringify({
+  argv: process.argv.slice(2),
+  session_id: input.session_id,
+  hasTranscript: typeof input.transcript_path === "string"
+}) + "\\n");
+`
+  );
+
+  // Text every shell would rewrite: $(…) is command substitution in bash and a
+  // subexpression in PowerShell, and backticks substitute in both. Arriving
+  // byte-for-byte is the proof that no shell sat between the host and node.
+  const canary = "nc$(echo INJECTED)`echo INJECTED`end";
+  await writeHookSettings(dir, {
+    Stop: [{ hooks: [{ type: "command", command: "node", args: [probe, canary], timeout: 15 }] }]
+  });
+
+  await claude(["-p", "Reply with exactly: EXECOK"], { cwd: dir, env: cleanEnv() });
+
+  const entries = await readJsonl(log);
+  const first = entries[0] ?? {};
+  record(
+    "exec-form hook runs and still receives the Stop payload on stdin",
+    typeof first.session_id === "string" && first.session_id.length > 0 && first.hasTranscript === true,
+    entries.length > 0 ? `invocations=${entries.length}` : "hook never ran"
+  );
+  // argv is already sliced past node and the script, so the canary is its only
+  // element — an extra one would mean a shell had split the argument.
+  record(
+    "exec-form args reach the process verbatim — no shell interpretation",
+    Array.isArray(first.argv) && first.argv.length === 1 && first.argv[0] === canary,
+    JSON.stringify(first.argv ?? null)
+  );
+}
+
+// --- phase 5: the shipped manifest, installed as a real plugin -------------------
+
+// Phases 1-4 wire the hook scripts by hand through project settings, which
+// leaves the one thing only an install exercises untested: whether the host
+// substitutes ${CLAUDE_PLUGIN_ROOT} inside `args`. If it did not, node would
+// be handed a literal placeholder and the hook would silently never run —
+// exactly the failure a hand-wired test cannot see.
+async function installedPlugin(root) {
+  const dir = path.join(root, "installed");
+  const configDir = path.join(root, "installed-config");
+  const market = path.join(root, "installed-market");
+  const home = path.join(root, "installed-home");
+  for (const target of [dir, configDir, home, path.join(market, ".claude-plugin")]) {
+    await mkdir(target, { recursive: true });
+  }
+
+  // A copy, not the working tree: an install is what ships, and copying keeps
+  // ${CLAUDE_PLUGIN_ROOT} pointing somewhere this phase owns and deletes.
+  await cp(path.join(repo, "plugins", "claude-code", "neatcontext"), path.join(market, "neatcontext"), {
+    recursive: true
+  });
+  await writeFile(
+    path.join(market, ".claude-plugin", "marketplace.json"),
+    JSON.stringify(
+      {
+        name: "nc-e2e",
+        owner: { name: "neatcontext e2e" },
+        plugins: [{ name: "neatcontext", source: "./neatcontext", description: "e2e build under test" }]
+      },
+      null,
+      2
+    )
+  );
+
+  // A private config dir keeps this install away from the developer's own
+  // plugins: same plugin name from a second marketplace would load twice.
+  const env = cleanEnv({
+    CLAUDE_CONFIG_DIR: configDir,
+    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json")
+  });
+
+  const added = await run("claude", ["plugin", "marketplace", "add", market], { cwd: dir, env });
+  const installed = await run("claude", ["plugin", "install", "neatcontext@nc-e2e", "--scope", "user"], {
+    cwd: dir,
+    env
+  });
+  if (installed.code !== 0) {
+    record("the shipped manifest installs as a plugin", false, (installed.err || added.err).trim().slice(-160));
+    return;
+  }
+
+  // A fresh config dir has no login. The token is copied in for the single
+  // headless call below and shredded in the finally, whatever happens.
+  const credentials = path.join(os.homedir(), ".claude", ".credentials.json");
+  const scoped = path.join(configDir, ".credentials.json");
+  const token = await readFile(credentials, "utf8").catch(() => null);
+  if (token === null) {
+    console.log(`SKIP  no ${credentials} to scope into the test config — run the installed-plugin phase on a logged-in machine`);
+    return;
+  }
+
+  try {
+    await writeFile(scoped, token, { mode: 0o600 });
+    // Trust belongs in *this* config's project map, not the developer's.
+    const configFile = path.join(configDir, ".claude.json");
+    const config = JSON.parse(await readFile(configFile, "utf8").catch(() => "{}"));
+    config.projects ??= {};
+    for (const key of new Set([path.resolve(dir), realpathSync.native(dir), dir.replaceAll("\\", "/")])) {
+      config.projects[key] = { ...config.projects[key], hasTrustDialogAccepted: true };
+    }
+    await writeFile(configFile, JSON.stringify(config, null, 2));
+
+    const { out, err } = await run("claude", ["--model", "haiku", "-p", "Reply with exactly: PLUGINOK"], {
+      cwd: dir,
+      env
+    });
+
+    let routing = {};
+    try {
+      routing = JSON.parse(await readFile(path.join(home, "plugin-routing.json"), "utf8"));
+    } catch {
+      // Left empty: the assertion below reports what was missing.
+    }
+    const counted = Object.values(routing.sessions ?? {}).find((session) => session.save?.turns >= 1);
+    record(
+      "the installed plugin's Stop hook runs, so ${CLAUDE_PLUGIN_ROOT} resolved inside args",
+      Boolean(counted) && counted.save.transcriptOffset > 0,
+      counted
+        ? `turns=${counted.save.turns} transcriptOffset=${counted.save.transcriptOffset}`
+        : `no session state; model said ${JSON.stringify(out.trim().slice(-60))} ${err.trim().slice(-120)}`
+    );
+  } finally {
+    await rm(scoped, { force: true });
+  }
+}
+
 // The long form, not the MAZONG~1 short form Windows hands out for tmpdir:
 // claude's permission engine compares the cwd against the project path it
 // trusts, and a short-path cwd reads as a different directory — every file
@@ -325,7 +483,7 @@ try {
   // a claude process flushes its own snapshot of ~/.claude.json when it ends,
   // and a snapshot loaded before a later phase's trust entry existed would
   // erase it. Loading them all up front makes every snapshot carry them.
-  for (const name of ["probe", "feature", "precompact"]) {
+  for (const name of ["probe", "feature", "precompact", "execform"]) {
     const dir = path.join(root, name);
     await mkdir(dir, { recursive: true });
     await trustProject(dir);
@@ -333,6 +491,8 @@ try {
   await probeStopContract(root);
   await liveFeature(root);
   await probePreCompact(root);
+  await probeExecForm(root);
+  await installedPlugin(root);
 } finally {
   await untrustProjects();
   if (!keep) await rm(root, { recursive: true, force: true });
