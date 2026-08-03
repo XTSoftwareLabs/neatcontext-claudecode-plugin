@@ -189,7 +189,7 @@ function openSession() {
 
 describe("saving the current conversation", () => {
   it("creates a self-contained context without connecting it", async () => {
-    const { file, output } = await saveCapture(validCapture(), { consume: true });
+    const { file, output } = await saveCapture(validCapture());
     const bundle = bundleFrom(output);
 
     assert.deepEqual(output.split(/\r?\n/), [
@@ -356,7 +356,7 @@ describe("saving the current conversation", () => {
         `${validCapture().knowledge[1].content}\n`
       );
 
-      const updated = await cli("save", "--from", file, "--yes", "--consume");
+      const updated = await cli("save", "--from", file, "--yes");
       assert.match(updated, /Updated context: Conversation Capture/);
       assert.equal(bundleFrom(updated), bundle);
       await assert.rejects(readFile(file, "utf8"), { code: "ENOENT" });
@@ -985,14 +985,20 @@ describe("the Claude-facing save workflow", () => {
 
     assert.match(saveCommand, /disable-model-invocation: true/);
     assert.match(saveCommand, /model active in this session/);
+    assert.match(saveCommand, /only permitted transcript reader/);
+    assert.match(saveCommand, /neatcontext-cli\.mjs" evidence/);
+    assert.match(saveCommand, /evidence --search/);
+    assert.match(saveCommand, /evidence --show/);
+    assert.match(saveCommand, /evidence --coverage-from/);
+    assert.match(saveCommand, /Lexical absence is not proof/);
     assert.match(saveCommand, /session-summary\.md/);
     assert.match(saveCommand, /Never write secret values/);
     assert.match(saveCommand, /Save \/ Save As semantics/);
     assert.match(saveCommand, /save-target/);
     assert.match(saveCommand, /Relay that preview and ask the user to confirm/);
-    assert.match(saveCommand, /--yes --consume/);
+    assert.match(saveCommand, /save --from .* --yes/);
     assert.match(saveCommand, /linked knowledge folder is\s+read-only/);
-    assert.match(saveCommand, /save --from .* --consume/);
+    assert.match(saveCommand, /removes the scratch JSON only after a successful create/);
     assert.match(saveCommand, /Do not connect a new or named context\s+automatically/);
     assert.match(createCommand, /fresh context/);
     assert.match(createCommand, /\/neatcontext:save/);
@@ -1008,7 +1014,7 @@ describe("the Claude-facing save workflow", () => {
   it("advertises every command in the CLI help", async () => {
     assert.match(
       await cli("not-a-command"),
-      /status \| list \| use \| disconnect \| create \| save \| import \| export \| delete/
+      /status \| list \| use \| disconnect \| create \| save-target \| evidence \| save \| import \| export \| delete/
     );
   });
 

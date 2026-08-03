@@ -7,7 +7,7 @@
 
 import { configureSessionId } from "../src/core/session.mjs";
 import { updateRouting } from "../src/core/routing.mjs";
-import { normalizeSaveState } from "../src/core/save-nudge.mjs";
+import { normalizeSaveState, rememberTranscriptPath } from "../src/core/save-nudge.mjs";
 
 async function main() {
   let raw = "";
@@ -21,6 +21,7 @@ async function main() {
 
   await updateRouting((state) => {
     const save = normalizeSaveState(state.sessions[id]?.save);
+    rememberTranscriptPath(save, input.transcript_path);
     save.compactPending = true;
     state.sessions[id] = { ...state.sessions[id], save, updatedAt: new Date().toISOString() };
   });
