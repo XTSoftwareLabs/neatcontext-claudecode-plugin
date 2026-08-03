@@ -199,7 +199,7 @@ function formatList(state) {
       state.lite,
       0,
       connectedId,
-      "(none — create one with `/neatcontext:create`)"
+      "(none — save this conversation with `/neatcontext:save`, or create one from a docs folder with `/neatcontext:create`)"
     ),
     formatSection("Standard contexts:", standard, state.lite.length, connectedId, NO_STANDARD_NOTE)
   ].join("\n\n");
@@ -211,7 +211,7 @@ function formatLiteList(state) {
     state.lite,
     0,
     state.connected?.id ?? null,
-    "(none — create one with `/neatcontext:create`)"
+    "(none — save this conversation with `/neatcontext:save`, or create one from a docs folder with `/neatcontext:create`)"
   );
 }
 
@@ -332,7 +332,16 @@ async function commandStatus(state) {
     );
     return;
   }
-  print("No context is connected yet. Use `/neatcontext:use` to pick one.");
+  // With nothing to connect, `/neatcontext:use` is a dead end: it lists nothing,
+  // and `/neatcontext:create` needs a folder of documents a new user may not
+  // have yet. Saving the conversation is the one route that always works.
+  print(
+    state.contexts.length === 0
+      ? "No context is connected, and there are none to connect. Save this conversation as your " +
+        "first one with `/neatcontext:save`, or build one from a folder of docs with " +
+        "`/neatcontext:create`."
+      : "No context is connected yet. Use `/neatcontext:use` to pick one."
+  );
   reportMode();
 }
 

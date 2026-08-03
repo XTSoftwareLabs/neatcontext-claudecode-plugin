@@ -226,6 +226,23 @@ describe("session instructions for a lite context", () => {
     }
   });
 
+  // With nothing on disk, `/neatcontext:use` lists nothing and
+  // `/neatcontext:create` refuses without a folder of documents — so guidance
+  // naming only those two leaves a new user with no route in at all. Saving the
+  // conversation is the one that always works, and it has to be offered.
+  it("offers save when there is nothing to connect", async () => {
+    const session = openSession();
+    try {
+      await session.handshake();
+      const answer = contextText(await session.getContext());
+      assert.match(answer, /No NeatContext Context is connected to this session/);
+      assert.match(answer, /\/neatcontext:save/);
+      assert.match(answer, /nothing to list/);
+    } finally {
+      await session.close();
+    }
+  });
+
   it("tells a session with nothing connected how to get grounded", async () => {
     const session = openSession();
     try {
@@ -454,7 +471,11 @@ describe("deleting a lite context", () => {
 
     const output = await cli("delete", "Payments", "--yes");
     assert.match(output, /no longer grounded/);
-    assert.match(await cli("status"), /No context is connected yet/);
+    // That was the only context, so status reports the empty store rather than
+    // sending the user to `/neatcontext:use`, which now has nothing to list.
+    const status = await cli("status");
+    assert.match(status, /No context is connected, and there are none to connect/);
+    assert.match(status, /\/neatcontext:save/);
   });
 });
 

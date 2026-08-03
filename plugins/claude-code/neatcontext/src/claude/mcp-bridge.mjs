@@ -66,14 +66,35 @@ const GET_CONTEXT_TOOL = {
     "knowledge folders to search, and the extension tools available on this connection.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false }
 };
-// The one thing to say when a session has nothing to ground in. It is
-// deliberately about what to do *here*: the app being closed, mid-restart, or
-// holding no connection are all the same situation from inside Claude Code, and
-// all of them are answered by picking a context from this session.
+// What to say when a session has nothing to ground in. It is deliberately about
+// what to do *here*: the app being closed, mid-restart, or holding no
+// connection are all the same situation from inside Claude Code, and all of
+// them are answered by a command in this session.
+//
+// Two versions, because "pick one of yours" and "you have none yet" are
+// different problems. With nothing on disk `/neatcontext:use` has nothing to
+// list, and `/neatcontext:create` wants a folder of documents a new user may
+// not have — so a session told only about those two sends the user to two doors
+// that are both locked. `/neatcontext:save` is the one that always opens: it
+// builds the first context out of the conversation already happening. So it
+// leads when there is nothing to connect.
+const NOTHING_CONNECTED_HEAD = "No NeatContext Context is connected to this session.";
+
 const NOTHING_CONNECTED =
-  "No NeatContext Context is connected to this session. Connect one with " +
-  "`/neatcontext:use`, or create a local one with `/neatcontext:create` — that one needs " +
-  "nothing else installed. Until then, do not answer from general knowledge.";
+  `${NOTHING_CONNECTED_HEAD} Connect one with \`/neatcontext:use\`, save this conversation as ` +
+  "a new one with `/neatcontext:save`, or create one from a folder of documents with " +
+  "`/neatcontext:create`. Until then, do not answer from general knowledge.";
+
+// Deliberately "none to connect right now" rather than "none exist": a closed
+// desktop app hides its standard contexts from this process, and claiming the
+// user has none would be a guess about software the plugin cannot see. What is
+// true either way is that `/neatcontext:use` has nothing to offer this session.
+const NOTHING_EXISTS =
+  `${NOTHING_CONNECTED_HEAD} There are none to connect right now, so \`/neatcontext:use\` has ` +
+  "nothing to list. Save the work in this conversation as a new one with " +
+  "`/neatcontext:save` — it needs no folder and nothing else installed — or point " +
+  "`/neatcontext:create` at a folder of docs, runbooks, or TSGs you already have. Until then, " +
+  "do not answer from general knowledge.";
 
 // How connecting works in Claude Code, stated by the plugin because NeatContext
 // cannot state it: its own framing is written for its desktop client, where
@@ -83,7 +104,7 @@ const NOTHING_CONNECTED =
 // So this rides on both channels a session reads, and says which one wins.
 const CONNECTION_RULE = `## Connecting a context, in Claude Code
 
-Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. \`/neatcontext:create\` makes a new local one from here.
+Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. New ones are made from here too: \`/neatcontext:save\` turns the work in this conversation into one, and \`/neatcontext:create\` builds one around a folder of documents the user already has.
 
 Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
@@ -180,7 +201,7 @@ These instructions are fixed at the handshake and cannot be updated, so they are
 When the user asks anything that depends on their own domain, documents, tools, or team conventions, call the get_context tool and let its answer decide:
 
 - If it returns a Context, ground your answer in it and cite what you used.
-- Only if it reports that nothing is connected, say so, and tell them to connect one with /neatcontext:use — or to create a local one with /neatcontext:create, which needs no other software.`;
+- Only if it reports that nothing is connected, say so, and offer the way forward it names — connecting an existing context with /neatcontext:use, saving this conversation as a new one with /neatcontext:save, or building one from a folder of documents with /neatcontext:create. Which of those actually applies depends on what exists right now, so relay what the tool says rather than guessing from this text.`;
 
 // Methods whose answer depends on which context is connected.
 const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);
@@ -315,11 +336,23 @@ async function liteResponse(message, lite) {
 
 // --- Offline fallback: keep the MCP server usable without NeatContext --------
 
-function notConnected(id) {
-  return jsonRpcResult(id, { content: [{ type: "text", text: NOTHING_CONNECTED }], isError: false });
+// Resolved per call, never fixed at startup: the user can save or create the
+// first context mid-session, and the next get_context has to stop telling them
+// there is nothing to connect. The list this reads is the same one the routing
+// menu is built from moments later, so it costs nothing extra.
+async function nothingConnectedText() {
+  const { contexts } = await listAllContexts().catch(() => ({ contexts: [] }));
+  return contexts.length === 0 ? NOTHING_EXISTS : NOTHING_CONNECTED;
 }
 
-function offlineResponse(message) {
+async function notConnected(id) {
+  return jsonRpcResult(id, {
+    content: [{ type: "text", text: await nothingConnectedText() }],
+    isError: false
+  });
+}
+
+async function offlineResponse(message) {
   const { id, method, params } = message;
   if (method === "initialize") {
     return jsonRpcResult(id, {
@@ -336,9 +369,9 @@ function offlineResponse(message) {
   if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
   if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
   if (method === "tools/call" && params?.name === "get_context") {
-    return notConnected(id);
+    return await notConnected(id);
   }
-  return { jsonrpc: "2.0", id, error: { code: -32601, message: NOTHING_CONNECTED } };
+  return { jsonrpc: "2.0", id, error: { code: -32601, message: await nothingConnectedText() } };
 }
 
 // --- Routing: the session picks its own context ------------------------------
@@ -520,7 +553,7 @@ async function forward(message) {
     }
     return response;
   } catch {
-    return offlineResponse(message);
+    return await offlineResponse(message);
   }
 }
 
@@ -651,7 +684,7 @@ async function shapeResponse(message, response, lite, state) {
     // the bridge already knows the connection state, so it says it itself rather
     // than forwarding advice the user cannot act on from Claude Code.
     const grounded = lite || state?.connected;
-    return withNotes(grounded ? response : notConnected(message.id), "content");
+    return withNotes(grounded ? response : await notConnected(message.id), "content");
   }
   return response;
 }
