@@ -116,8 +116,15 @@ behavioral, tone, or answer-format instructions in this line.
 
 ## Write the capture
 
-Write one valid JSON file, with no surrounding code fence, to
-`.neatcontext-capture.json` in the root of the current workspace folder.
+Write one valid JSON file, with no surrounding code fence, to a uniquely named
+scratch file `.neatcontext-capture-<unique>.json` in the current workspace —
+for example `.neatcontext-capture-copilot-1.json`. Keep the
+`.neatcontext-capture-` prefix: that is what the repository `.gitignore`
+pattern matches, and the unique part is what stops two sessions in the same
+workspace from overwriting each other mid-save.
+
+Remember the exact path you wrote. Every command below refers to it as
+`<capture-path>`; pass the path you actually used, not the placeholder.
 
 For a new context, use exactly this shape:
 
@@ -160,20 +167,20 @@ Every knowledge path must be a short relative `.md` path.
 For creation, save and consume the capture immediately:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from ".neatcontext-capture.json" --consume
+node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from "<capture-path>" --consume
 ```
 
 For an update, run the same command without `--consume` first. It prints an
 exact preview and changes nothing:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from ".neatcontext-capture.json"
+node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from "<capture-path>"
 ```
 
 Relay that preview and ask the user to confirm. Only after they confirm, run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from ".neatcontext-capture.json" --yes --consume
+node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" save --from "<capture-path>" --yes --consume
 ```
 
 `--consume` removes only the scratch JSON after a successful save. Validation,

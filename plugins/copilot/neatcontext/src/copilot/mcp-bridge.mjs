@@ -47,20 +47,37 @@ const GET_CONTEXT_TOOL = {
     "knowledge folders to search.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false }
 };
-// The one thing to say when a session has nothing to ground in. It is
-// deliberately about what to do *here*: connect or create a context from this
-// session — no other software is involved.
+// What to say when a session has nothing to ground in. It is deliberately about
+// what to do *here*: every route is a command in this session, and no other
+// software is involved.
+//
+// Two versions, because "pick one of yours" and "you have none yet" are
+// different problems. With an empty store `/neatcontext:use` has nothing to
+// list, and `/neatcontext:create` wants a folder of documents a new user may
+// not have — so a session told only about those two is sent to two doors that
+// are both locked. `/neatcontext:save` is the one that always opens: it builds
+// the first context out of the conversation already happening. So it leads when
+// there is nothing to connect.
+const NOTHING_CONNECTED_HEAD = "No NeatContext Context is connected to this session.";
+
 const NOTHING_CONNECTED =
-  "No NeatContext Context is connected to this session. Connect one with " +
-  "`/neatcontext:use`, or create a local one with `/neatcontext:create` — that one needs " +
-  "nothing else installed. Until then, do not answer from general knowledge.";
+  `${NOTHING_CONNECTED_HEAD} Connect one with \`/neatcontext:use\`, save this conversation as ` +
+  "a new one with `/neatcontext:save`, or create one from a folder of documents with " +
+  "`/neatcontext:create`. Until then, do not answer from general knowledge.";
+
+const NOTHING_EXISTS =
+  `${NOTHING_CONNECTED_HEAD} There are none on this machine yet, so \`/neatcontext:use\` has ` +
+  "nothing to list. Save the work in this conversation as the first one with " +
+  "`/neatcontext:save` — it needs no folder and nothing else installed — or point " +
+  "`/neatcontext:create` at a folder of docs, runbooks, or TSGs you already have. Until then, " +
+  "do not answer from general knowledge.";
 
 // How connecting works here, stated so a session never sends the user to the
 // NeatContext desktop app: the Copilot plugin has no connection to it, and any
 // framing that mentions it comes from content written for a different client.
 const CONNECTION_RULE = `## Connecting a context, in GitHub Copilot
 
-Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. \`/neatcontext:create\` makes a new local one from here.
+Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. New ones are made from here too: \`/neatcontext:save\` turns the work in this conversation into one, and \`/neatcontext:create\` builds one around a folder of documents the user already has.
 
 Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — the Copilot plugin stores its contexts itself and has no connection to that app. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
@@ -149,7 +166,7 @@ These instructions are fixed at the handshake and cannot be updated, so they are
 When the user asks anything that depends on their own domain, documents, tools, or team conventions, call the get_context tool and let its answer decide:
 
 - If it returns a Context, ground your answer in it and cite what you used.
-- Only if it reports that nothing is connected, say so, and tell them to connect one with /neatcontext:use — or to create a new local one with /neatcontext:create.`;
+- Only if it reports that nothing is connected, say so, and offer the way forward it names — connecting an existing context with /neatcontext:use, saving this conversation as a new one with /neatcontext:save, or building one from a folder of documents with /neatcontext:create. Which of those actually applies depends on what exists right now, so relay what the tool says rather than guessing from this text.`;
 
 function writeLine(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -166,6 +183,14 @@ function jsonRpcResult(id, result) {
 async function listAllLite() {
   const lite = (await listLite()).map((context) => ({ ...context, kind: "lite" }));
   return { contexts: lite };
+}
+
+// Resolved per call, never fixed at startup: the user can create or save the
+// first context mid-session, and the next get_context has to stop telling them
+// they have none.
+async function nothingConnectedText() {
+  const { contexts } = await listAllLite().catch(() => ({ contexts: [] }));
+  return contexts.length === 0 ? NOTHING_EXISTS : NOTHING_CONNECTED;
 }
 
 // The selected lite context, or null when nothing is selected. A selection
@@ -204,7 +229,7 @@ async function liteResponse(message, lite) {
   if (method === "tools/call" && params?.name === GET_CONTEXT_TOOL.name) {
     if (!lite) {
       return jsonRpcResult(id, {
-        content: [{ type: "text", text: NOTHING_CONNECTED }],
+        content: [{ type: "text", text: await nothingConnectedText() }],
         isError: false
       });
     }

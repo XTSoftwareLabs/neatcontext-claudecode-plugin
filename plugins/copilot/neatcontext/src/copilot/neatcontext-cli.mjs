@@ -105,7 +105,7 @@ function formatList(state) {
     "Lite contexts:",
     state.lite,
     state.connected?.id ?? null,
-    "(none — create one with `/neatcontext:create`)"
+    "(none — save this conversation with `/neatcontext:save`, or create one from a docs folder with `/neatcontext:create`)"
   );
 }
 
@@ -184,7 +184,15 @@ async function commandStatus(state) {
     return;
   }
 
-  print("No context is connected yet. Use `/neatcontext:use` to pick one.");
+  // With an empty store `/neatcontext:use` has nothing to offer, so pointing
+  // at it is a dead end for anyone who has just installed the plugin.
+  print(
+    state.lite.length === 0
+      ? "No context is connected, and there are none yet. Save this conversation as your first " +
+        "one with `/neatcontext:save`, or build one from a folder of docs with " +
+        "`/neatcontext:create`."
+      : "No context is connected yet. Use `/neatcontext:use` to pick one."
+  );
   reportMode();
 }
 

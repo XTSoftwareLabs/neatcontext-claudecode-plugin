@@ -468,6 +468,8 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
   const empty = await session.call(toolCall(3, "get_context"));
   assert.equal(empty.result.isError, false);
   assert.match(empty.result.content[0].text, /No NeatContext Context is connected/);
+  // A context exists here, so `use` is a real option and leads.
+  assert.match(empty.result.content[0].text, /\/neatcontext:use/);
 
   // Ask mode is the default: the switch must be refused until requested.
   const refused = await session.call(
@@ -503,6 +505,65 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
   const unknown = await session.call(toolCall(9, "demo_ctx_payments"));
   assert.equal(unknown.error.code, -32601);
   assert.match(unknown.error.message, /lite contexts only/);
+});
+
+// The cold start a new user actually meets: plugin installed, nothing saved
+// yet. `use` has nothing to list and `create` refuses without a folder of
+// documents, so guidance naming only those two sends them to two locked doors.
+// Reported from a real VS Code Copilot session before this was fixed.
+test("Copilot empty store points at save rather than an empty context list", async (t) => {
+  const home = await isolatedHome("neatcontext-copilot-cold-");
+  const sessions = [];
+  t.after(async () => {
+    await Promise.all(sessions.map((session) => session.close()));
+  });
+  const env = { ...home.env, NEATCONTEXT_SESSION_ID: "copilot-cold-a" };
+
+  const session = rpcSession(env);
+  sessions.push(session);
+  await session.call(initialize(1));
+
+  const answer = (await session.call(toolCall(2, "get_context"))).result.content[0].text;
+  assert.match(answer, /No NeatContext Context is connected to this session/);
+  assert.match(answer, /\/neatcontext:save/, "an empty store must offer save");
+  assert.match(answer, /nothing to list/, "it must say why use is not the answer");
+  assert.match(answer, /\/neatcontext:create/);
+
+  // `create` demands a pre-existing folder, so it must never be the only route
+  // offered to someone who has nothing yet.
+  const created = await runNode(
+    cli,
+    ["create", "--name", "no folder", "--profile-from", "does-not-exist.md"],
+    { env }
+  );
+  assert.match(created.stdout, /Could not read the profile file|knowledge folder is required/i);
+
+  const status = await runNode(cli, ["status"], { env });
+  assert.match(status.stdout, /\/neatcontext:save/, "status must offer save with an empty store");
+
+  const list = await runNode(cli, ["list"], { env });
+  assert.match(list.stdout, /\/neatcontext:save/, "the empty list note must offer save");
+});
+
+// The scratch capture file carries a distilled dump of the conversation, so it
+// must land on a path the repository ignores, and must not be a fixed name two
+// sessions in one workspace would fight over.
+test("Copilot save.md writes the capture where .gitignore covers it", async () => {
+  const [save, gitignore] = await Promise.all([
+    readFile(path.join(pluginRoot, "commands", "save.md"), "utf8"),
+    readFile(path.join(repositoryRoot, ".gitignore"), "utf8")
+  ]);
+
+  assert.match(gitignore, /^\.neatcontext-capture-\*\.json$/m);
+  assert.match(save, /\.neatcontext-capture-<unique>\.json/);
+  assert.doesNotMatch(
+    save,
+    /--from "\.[^"]*\.json"/,
+    "the save commands must take the path actually written, not a hardcoded relative one"
+  );
+  for (const [, flag] of save.matchAll(/save --from "([^"]+)"/g)) {
+    assert.equal(flag, "<capture-path>");
+  }
 });
 
 test("Copilot MCP bridge hides the routing tools in manual mode", async (t) => {
