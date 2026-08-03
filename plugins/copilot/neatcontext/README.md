@@ -36,8 +36,13 @@ Or from the marketplace (its Copilot-format index lives at
 
 ```bash
 copilot plugin marketplace add XTSoftwareLabs/neatcontext-plugins
-copilot plugin install neatcontext-copilot@neatcontext
+copilot plugin install neatcontext@neatcontext
 ```
+
+Either route installs the plugin as `neatcontext`, so its commands are
+`/neatcontext:list`, `/neatcontext:save`, and so on — Copilot namespaces
+commands by the installed plugin name. Install it only once: a second copy
+under a different name gives you a duplicate set of commands.
 
 ### Copilot in VS Code (Agent Plugins preview)
 
