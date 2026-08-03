@@ -4,8 +4,8 @@
 //
 // This process has no model (see save-nudge.mjs). It updates counters from the
 // transcript delta under the whitelist stated in PRIVACY.md, runs the pure
-// gate, and either exits quietly or prints {"decision": "block", "reason"} for
-// the host. The nudge is an enhancement: any failure here must end in a silent
+// gate, and either exits quietly or hands the host a Stop `additionalContext`
+// payload. The nudge is an enhancement: any failure here must end in a silent
 // exit 0, never in a turn that cannot stop.
 
 import { open, stat } from "node:fs/promises";
@@ -133,11 +133,20 @@ async function main() {
     }
   });
 
+  // `additionalContext`, not `{decision: "block", reason}`. A block's `reason`
+  // is delivered as a user-role message prefixed "Stop hook feedback:", so the
+  // host prints this entire instruction in the transcript — the user reads the
+  // prompt meant for the model, every word of it, before the ask it produces.
+  // `additionalContext` reaches the model out of band and appears nowhere in
+  // the conversation, while still granting the turn the ask needs. The host
+  // marks that turn `stop_hook_active`, so the guard above still applies.
   if (verdict.fire) {
     process.stdout.write(
       JSON.stringify({
-        decision: "block",
-        reason: proposalInstruction({ reasons: verdict.reasons, liteConnectedName })
+        hookSpecificOutput: {
+          hookEventName: "Stop",
+          additionalContext: proposalInstruction({ reasons: verdict.reasons, liteConnectedName })
+        }
       })
     );
   }
