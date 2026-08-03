@@ -19,6 +19,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "..");
 const claudeRoot = path.join(repositoryRoot, "plugins", "claude-code", "neatcontext");
 const pluginRoot = path.join(repositoryRoot, "plugins", "copilot", "neatcontext");
+// Copilot reads .claude-plugin/plugin.json too, so the fork ran on the Claude
+// manifest for a while. The awesome-copilot external-plugin intake does not:
+// its quality gates look only under .github/plugin/, .plugin/, and the plugin
+// root, and failed the v0.2.6 submission with "no plugin.json was found in any
+// recognized location". This is the one location both the CLI and that intake
+// accept, and it matches the marketplace index at the repository root.
+const manifestFile = path.join(pluginRoot, ".github", "plugin", "plugin.json");
 const cli = path.join(pluginRoot, "src", "copilot", "neatcontext-cli.mjs");
 const bridge = path.join(pluginRoot, "src", "copilot", "mcp-bridge.mjs");
 const commandNames = [
@@ -226,7 +233,7 @@ async function createLiteContext(home, name, { sessionId = "copilot-test" } = {}
 test("Copilot plugin manifest is complete, version-aligned, and listed in the marketplace", async () => {
   const [pluginText, marketplaceText, packageText, bridgeText, readme, copilotReadme] =
     await Promise.all([
-      readFile(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"),
+      readFile(manifestFile, "utf8"),
       readFile(path.join(repositoryRoot, ".claude-plugin", "marketplace.json"), "utf8"),
       readFile(path.join(repositoryRoot, "package.json"), "utf8"),
       readFile(bridge, "utf8"),
@@ -253,6 +260,11 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   assert.deepEqual(server.args, ["${CLAUDE_PLUGIN_ROOT}/src/copilot/mcp-bridge.mjs"]);
   const prefix = "${CLAUDE_PLUGIN_ROOT}/";
   assert.ok((await stat(path.join(pluginRoot, server.args[0].slice(prefix.length)))).isFile());
+
+  // Component paths in this manifest resolve from the plugin root, not from the
+  // directory the manifest sits in.
+  assert.equal(plugin.commands, "./commands/");
+  assert.ok((await stat(path.join(pluginRoot, "commands"))).isDirectory());
 
   // The Claude marketplace lists the Claude plugin and nothing else. Copilot
   // rejects that file wholesale anyway (git-subdir sources), and an entry for
@@ -308,6 +320,40 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
     new RegExp(`copilot plugin install ${copilotEntry.name}@${copilotMarketplace.name}`)
   );
   assert.match(copilotReadme, /\[Privacy Policy\]\(\.\.\/\.\.\/\.\.\/PRIVACY\.md\)/);
+});
+
+// The awesome-copilot external-plugin intake installs the plugin, then looks
+// for its manifest under exactly these three paths. A manifest anywhere else
+// fails both the install smoke test and the version-match gate, no matter that
+// the Copilot CLI itself would have loaded it — that is how the v0.2.6
+// submission (github/awesome-copilot#2530) failed. The manifest is also the
+// only place the plugin's version is published to that intake, so it has to
+// track package.json, which the manifest test above asserts.
+test("Copilot manifest sits where the awesome-copilot intake looks for it", async () => {
+  const recognized = [
+    path.join(".github", "plugin", "plugin.json"),
+    path.join(".plugin", "plugin.json"),
+    "plugin.json"
+  ];
+  const found = [];
+  for (const candidate of recognized) {
+    const file = path.join(pluginRoot, candidate);
+    if (await stat(file).then(() => true, () => false)) found.push(candidate);
+  }
+  assert.deepEqual(
+    found,
+    [path.join(".github", "plugin", "plugin.json")],
+    "the intake reads the first recognized manifest, so ship exactly one"
+  );
+
+  // Two manifests is one manifest too many: whichever the host picks first
+  // wins, and the other drifts unnoticed. The Claude-format copy is the one
+  // that has to stay gone, because the intake cannot see it at all.
+  const entries = await readdir(pluginRoot);
+  assert.ok(
+    !entries.includes(".claude-plugin"),
+    "the copilot plugin must not carry a second, Claude-format manifest"
+  );
 });
 
 // src/core is a synced copy by repo convention. Copilot ships a subset of it —
@@ -606,9 +652,7 @@ test("Copilot MCP bridge hides the routing tools in manual mode", async (t) => {
 // that could prompt the user or fire on a schedule. Saving is the /neatcontext:save
 // command and nothing else.
 test("Copilot plugin registers no hooks and nothing that runs on its own", async () => {
-  const plugin = JSON.parse(
-    await readFile(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")
-  );
+  const plugin = JSON.parse(await readFile(manifestFile, "utf8"));
   assert.equal(plugin.hooks, undefined, "the copilot manifest must declare no hooks");
 
   const entries = await readdir(pluginRoot);

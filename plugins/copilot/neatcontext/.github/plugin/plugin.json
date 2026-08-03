@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "neatcontext",
   "displayName": "NeatContext",
   "version": "0.2.6",
@@ -18,6 +17,7 @@
     "grounding",
     "mcp"
   ],
+  "commands": "./commands/",
   "mcpServers": {
     "neatcontext": {
       "command": "node",
