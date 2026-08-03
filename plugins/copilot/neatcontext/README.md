@@ -25,35 +25,10 @@ benefits from what one person learned.
 
 ## Install
 
-### Copilot CLI
-
-```bash
-copilot plugin install XTSoftwareLabs/neatcontext-plugins:plugins/copilot/neatcontext
-```
-
-Or from the marketplace (its Copilot-format index lives at
-`.github/plugin/marketplace.json` and is named `neatcontext`):
-
 ```bash
 copilot plugin marketplace add XTSoftwareLabs/neatcontext-plugins
 copilot plugin install neatcontext@neatcontext
 ```
-
-Either route installs the plugin as `neatcontext`, so its commands are
-`/neatcontext:list`, `/neatcontext:save`, and so on — Copilot namespaces
-commands by the installed plugin name. Install it only once: a second copy
-under a different name gives you a duplicate set of commands.
-
-### Copilot in VS Code (Agent Plugins preview)
-
-Agent plugins are a preview feature: enable the `chat.plugins.enabled` setting
-first. Then add the marketplace and install:
-
-1. Add `XTSoftwareLabs/neatcontext-plugins` to the `chat.plugins.marketplaces`
-   setting, and install the plugin from the Extensions view — or run the
-   `Chat: Install Plugin From Source` command on a local clone of this
-   repository, pointing it at `plugins/copilot/neatcontext`.
-2. Reload the window when prompted.
 
 ## Commands
 
