@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "neatcontext-copilot",
+      "name": "neatcontext",
       "description": "Save GitHub Copilot work as reusable, domain-aware context",
       "version": "0.2.5",
       "source": "./plugins/copilot/neatcontext"

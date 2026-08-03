@@ -22,28 +22,18 @@
       "homepage": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
       "repository": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
       "license": "MIT",
-      "keywords": ["neatcontext", "context", "knowledge-management", "grounding", "mcp"],
-      "tags": ["context", "knowledge", "productivity"]
-    },
-    {
-      "name": "neatcontext-copilot",
-      "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/XTSoftwareLabs/neatcontext-plugins.git",
-        "path": "plugins/copilot/neatcontext",
-        "ref": "main"
-      },
-      "description": "Save GitHub Copilot work as reusable, domain-aware context",
-      "author": {
-        "name": "XTSoftwareLabs",
-        "url": "https://github.com/XTSoftwareLabs"
-      },
-      "homepage": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
-      "repository": "https://github.com/XTSoftwareLabs/neatcontext-plugins",
-      "license": "MIT",
-      "strict": false,
-      "keywords": ["neatcontext", "context", "knowledge-management", "grounding", "mcp", "copilot"],
-      "tags": ["context", "knowledge", "productivity"]
+      "keywords": [
+        "neatcontext",
+        "context",
+        "knowledge-management",
+        "grounding",
+        "mcp"
+      ],
+      "tags": [
+        "context",
+        "knowledge",
+        "productivity"
+      ]
     }
   ]
 }

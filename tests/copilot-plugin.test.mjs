@@ -254,22 +254,26 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   const prefix = "${CLAUDE_PLUGIN_ROOT}/";
   assert.ok((await stat(path.join(pluginRoot, server.args[0].slice(prefix.length)))).isFile());
 
-  const entry = marketplace.plugins.find((candidate) => candidate.name === "neatcontext-copilot");
-  assert.ok(entry, "marketplace.json must carry the copilot plugin entry");
-  assert.equal(entry.source.source, "git-subdir");
-  assert.equal(entry.source.path, "plugins/copilot/neatcontext");
-  assert.equal(entry.repository, "https://github.com/XTSoftwareLabs/neatcontext-plugins");
+  // The Claude marketplace lists the Claude plugin and nothing else. Copilot
+  // rejects that file wholesale anyway (git-subdir sources), and an entry for
+  // this plugin there would only offer a Claude Code user the lite-only Copilot
+  // build — while forcing a suffixed entry name to avoid colliding with the
+  // Claude one. That suffix is what leaked into the command namespace.
+  assert.deepEqual(
+    marketplace.plugins.map((candidate) => candidate.name),
+    ["neatcontext"],
+    ".claude-plugin/marketplace.json must list only the Claude plugin"
+  );
 
-  // Copilot CLI rejects the Claude marketplace's git-subdir sources outright
-  // (verified against copilot 1.0.59), so Copilot installs go through this
-  // second, Copilot-format index. Its only supported source is a relative
-  // path, which must keep pointing at the same plugin directory.
+  // Copilot installs go through this second, Copilot-format index. Its only
+  // supported source is a relative path, which must keep pointing at the same
+  // plugin directory.
   const copilotMarketplace = JSON.parse(
     await readFile(path.join(repositoryRoot, ".github", "plugin", "marketplace.json"), "utf8")
   );
   assert.equal(copilotMarketplace.name, "neatcontext");
   const copilotEntry = copilotMarketplace.plugins.find(
-    (candidate) => candidate.name === "neatcontext-copilot"
+    (candidate) => candidate.name === plugin.name
   );
   assert.ok(copilotEntry, ".github/plugin/marketplace.json must list the copilot plugin");
   assert.equal(copilotEntry.version, packageJson.version);
@@ -278,6 +282,18 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
     (await stat(path.join(repositoryRoot, copilotEntry.source))).isDirectory(),
     "the copilot marketplace source path must resolve"
   );
+
+  // Copilot namespaces slash commands by the installed plugin name, and a
+  // marketplace install takes that name from the entry, not the manifest. If
+  // the two ever diverge, the commands become /<entry-name>:list instead of
+  // /neatcontext:list — which is exactly what a suffixed entry name caused.
+  assert.equal(
+    copilotEntry.name,
+    plugin.name,
+    "the marketplace entry name must match the manifest name, or the command namespace shifts"
+  );
+  assert.match(copilotReadme, /\/neatcontext:list/);
+  assert.doesNotMatch(copilotReadme, /neatcontext-copilot/);
 
   assert.match(
     readme,
