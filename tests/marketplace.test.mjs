@@ -5,7 +5,16 @@ import test from "node:test";
 const ROOT = new URL("../", import.meta.url);
 const CANONICAL_REPOSITORY = "https://github.com/XTSoftwareLabs/neatcontext-plugins";
 const CLAUDE_PLUGIN_ROOT = "plugins/claude-code/neatcontext";
-const USER_ONLY_COMMANDS = ["create", "delete", "disconnect", "import", "mode", "save", "use"];
+const USER_ONLY_COMMANDS = [
+  "create",
+  "delete",
+  "disconnect",
+  "export",
+  "import",
+  "mode",
+  "save",
+  "use"
+];
 
 function read(relativePath) {
   return readFile(new URL(relativePath, ROOT), "utf8");
@@ -82,6 +91,7 @@ test("commands pre-approve only the bundled CLI and never interpolate arguments 
     "create",
     "delete",
     "disconnect",
+    "export",
     "import",
     "list",
     "mode",

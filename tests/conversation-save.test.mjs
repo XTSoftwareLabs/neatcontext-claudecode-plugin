@@ -805,6 +805,177 @@ describe("sharing a captured context", () => {
   });
 });
 
+// Export is the only mechanism that crosses the machine boundary: lite contexts
+// are shared between hosts by living in one folder on one machine, and nothing
+// else carries them further. So what these protect is that the bundle it writes
+// is exactly what import reads back, and that a context whose knowledge the
+// plugin does not own is refused rather than exported hollow.
+describe("exporting a captured context", () => {
+  async function exportedBundle(destination, ...extra) {
+    const { output } = await saveCapture();
+    const exported = await cli("export", "Conversation Capture", "--to", destination, ...extra);
+    return { saved: output, exported };
+  }
+
+  it("writes a bundle that imports back with its knowledge and routing intact", async () => {
+    const destination = path.join(home, "exports");
+    const { exported } = await exportedBundle(destination);
+
+    assert.match(exported, /Exported the "Conversation Capture" context\./);
+    assert.match(exported, /Knowledge files:\s+2/);
+    assert.match(exported, /the export is a copy/);
+
+    const bundle = /Bundle folder:\s+(.+)/.exec(exported)?.[1];
+    assert.equal(path.dirname(bundle), destination);
+    const manifest = JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8"));
+    assert.equal(manifest.knowledgeManaged, true);
+    assert.equal(manifest.knowledgeFolder, "knowledge");
+    assert.deepEqual(
+      (await readdir(path.join(bundle, "knowledge"), { withFileTypes: true }))
+        .map((entry) => entry.name)
+        .sort(),
+      ["implementation", "session-summary.md"]
+    );
+
+    // The round trip is the whole point: what export writes, import must read.
+    await cli("delete", "Conversation Capture", "--yes");
+    const imported = await cli("import", "--from", bundle);
+    assert.match(imported, /Imported the "Conversation Capture" conversation context/);
+    assert.match(imported, /2 files/);
+  });
+
+  it("refuses a context whose knowledge folder belongs to the user", async () => {
+    const { folder } = await createLinkedContext("Linked For Export");
+    const output = await cli(
+      "export",
+      "Linked For Export",
+      "--to",
+      path.join(home, "exports-linked")
+    );
+
+    assert.match(output, /links a knowledge folder this plugin does not own/);
+    assert.match(output, new RegExp(folder.replace(/[\\^$*+?.()|[\]{}]/g, "\\$&")));
+    assert.match(output, /re-create the context there with `\/neatcontext:create`/);
+    assert.doesNotMatch(output, /Exported/);
+  });
+
+  it("refuses to overwrite an existing bundle until --force is given", async () => {
+    const destination = path.join(home, "exports-twice");
+    await exportedBundle(destination);
+
+    const blocked = await cli("export", "Conversation Capture", "--to", destination);
+    assert.match(blocked, /already exists\. Re-run the export with --force/);
+
+    const forced = await cli("export", "Conversation Capture", "--to", destination, "--force");
+    assert.match(forced, /replacing what was there/);
+    const bundle = /Bundle folder:\s+(.+)/.exec(forced)?.[1];
+    assert.equal(
+      JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8")).name,
+      "Conversation Capture"
+    );
+    // A rolled-back or half-finished replace would leave its scratch directories
+    // behind next to the bundle.
+    assert.deepEqual(
+      (await readdir(destination)).filter((entry) => entry.startsWith(".neatcontext-export")),
+      []
+    );
+  });
+
+  it("keeps exported copies out of NeatContext's own storage", async () => {
+    await saveCapture();
+    const output = await cli(
+      "export",
+      "Conversation Capture",
+      "--to",
+      path.join(home, "lite", "nested")
+    );
+    assert.match(output, /inside NeatContext's own context storage/);
+    assert.match(output, /`\/neatcontext:import`/);
+  });
+
+  it("carries the routing description recorded after the context was saved", async () => {
+    const { output } = await saveCapture();
+    await cli("describe", "Conversation Capture", "--use-when", "refunds and chargeback disputes");
+
+    const destination = path.join(home, "exports-described");
+    const exported = await cli("export", "Conversation Capture", "--to", destination);
+    const bundle = /Bundle folder:\s+(.+)/.exec(exported)?.[1];
+    assert.equal(
+      JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8")).routingDescription,
+      "refunds and chargeback disputes"
+    );
+
+    // The exported copy is the one a teammate gets; the local context keeps the
+    // description it already had recorded against it.
+    assert.equal(
+      JSON.parse(await readFile(path.join(bundleFrom(output), "context.json"), "utf8"))
+        .routingDescription,
+      "Checkout recovery, payment retries, PAY-* tickets, and worker restarts"
+    );
+  });
+
+  it("exports the connected context when no name is given, and asks when none is", async () => {
+    await saveCapture();
+    const destination = path.join(home, "exports-connected");
+
+    assert.match(await cli("export", "--to", destination), /Which lite context should I export\?/);
+
+    await cli("use", "Conversation Capture");
+    assert.match(
+      await cli("export", "--to", destination),
+      /Exported the "Conversation Capture" context/
+    );
+  });
+
+  it("reports what it needs instead of guessing", async () => {
+    const { output } = await saveCapture();
+    assert.match(await cli("export"), /Pass the destination folder with --to/);
+    assert.match(
+      await cli("export", "Not A Context", "--to", path.join(home, "exports-missing")),
+      /No single lite context matched "Not A Context"/
+    );
+    assert.match(
+      await cli("export", "Conversation Capture", "--to", path.join(bundleFrom(output), "inner")),
+      /inside the context being exported/
+    );
+  });
+
+  it("surfaces an unexpected filesystem failure while exporting", async () => {
+    await saveCapture();
+    const blocker = path.join(home, "export-blocker");
+    await writeFile(blocker, "not a directory");
+
+    assert.match(
+      await cli("export", "Conversation Capture", "--to", path.join(blocker, "out")),
+      /NeatContext plugin error:/
+    );
+  });
+
+  it("guards the arguments and the copy that the command line cannot reach", async () => {
+    const { exportLite, requireUnchangedExport, LiteContextError } = await import(
+      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    );
+
+    await assert.rejects(
+      () => exportLite({ destination: path.join(home, "exports-none") }),
+      /No lite context was selected for export/
+    );
+    await assert.rejects(
+      () => exportLite({ record: { name: "X", knowledgeManaged: true }, destination: "  " }),
+      /export destination folder is required/
+    );
+
+    const record = { name: "Conversation Capture" };
+    assert.equal(requireUnchangedExport(record, "same", "same"), undefined);
+    assert.throws(
+      () => requireUnchangedExport(record, "before", "after"),
+      (error) =>
+        error instanceof LiteContextError &&
+        /changed while it was being exported\. Run the export again/.test(error.message)
+    );
+  });
+});
+
 describe("the Claude-facing save workflow", () => {
   it("defines a privacy-aware Save and Save As workflow", async () => {
     const root = path.resolve(claude, "..", "..");
@@ -826,12 +997,18 @@ describe("the Claude-facing save workflow", () => {
     assert.match(createCommand, /fresh context/);
     assert.match(createCommand, /\/neatcontext:save/);
     assert.match(importCommand, /source bundle is read-only/);
+
+    const exportCommand = await readFile(path.join(root, "commands", "export.md"), "utf8");
+    assert.match(exportCommand, /disable-model-invocation: true/);
+    assert.match(exportCommand, /\/neatcontext:import/);
+    assert.match(exportCommand, /cannot be exported/);
+    assert.match(exportCommand, /--force/);
   });
 
   it("advertises every command in the CLI help", async () => {
     assert.match(
       await cli("not-a-command"),
-      /status \| list \| use \| disconnect \| create \| save \| import \| delete/
+      /status \| list \| use \| disconnect \| create \| save \| import \| export \| delete/
     );
   });
 

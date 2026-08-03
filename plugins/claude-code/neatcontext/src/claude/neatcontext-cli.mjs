@@ -9,6 +9,7 @@
 //   save-target [name]          decide whether save creates or updates
 //   save --from <capture.json>  create or update from this conversation
 //   import --from <bundle>      import a portable conversation context
+//   export --to <folder>        copy a saved context's bundle out for sharing
 //   delete <query> [--yes]     delete a lite context
 //   mode [auto|ask|manual]     how the session may route itself between contexts
 //   describe <query> --use-when   record what a context should be routed for
@@ -27,6 +28,7 @@ import {
   createCapturedLite,
   createLite,
   deleteLite,
+  exportLite,
   fingerprintLite,
   importCapturedLite,
   LiteContextError,
@@ -762,6 +764,76 @@ async function commandImport(flags) {
   }
 }
 
+// Export resolves like `delete` — over lite contexts only, since a standard
+// context's files belong to the desktop app. The routing description is read
+// from the card rather than the manifest: `describe` records a newer line there,
+// and the copy the teammate imports should route the way this one does.
+async function commandExport(state, query, flags) {
+  const destination = typeof flags.to === "string" ? flags.to : "";
+  if (destination.trim().length === 0) {
+    print("Pass the destination folder with --to <folder>.");
+    return;
+  }
+
+  let target = null;
+  if (query.length === 0) {
+    if (state.connected?.kind === "lite" && state.connected.record) {
+      target = state.connected.record;
+    } else {
+      print("Which lite context should I export?");
+      print("");
+      print(formatLiteList(state));
+      return;
+    }
+  } else {
+    const resolution = resolveContext(state.lite, query);
+    if (resolution.error) {
+      const standardMatch = state.contexts.find(
+        (context) =>
+          context.kind === "standard" &&
+          context.name.toLowerCase().includes(query.toLowerCase())
+      );
+      if (standardMatch) {
+        print(
+          `"${standardMatch.name}" is a standard context. Only lite contexts can be exported ` +
+            "from here — standard ones are managed in the NeatContext desktop app."
+        );
+        return;
+      }
+      print(`No single lite context matched "${query}".`);
+      print("");
+      print(formatLiteList(state));
+      return;
+    }
+    target = resolution.context;
+  }
+
+  const routing = await readRouting();
+  try {
+    const result = await exportLite({
+      record: target,
+      destination,
+      force: flags.force === true || flags.force === "true",
+      routingDescription: routing.cards[target.id]?.useWhen
+    });
+    print(
+      result.replaced
+        ? `Exported the "${result.record.name}" context, replacing what was there.`
+        : `Exported the "${result.record.name}" context.`
+    );
+    print(`  Bundle folder:    ${result.destination}`);
+    print(`  Knowledge files:  ${result.knowledgeFileCount}`);
+    print(`  Import it with:   /neatcontext:import ${result.destination}`);
+    print("This context was not changed — the export is a copy.");
+  } catch (error) {
+    if (error instanceof LiteContextError) {
+      print(error.message);
+      return;
+    }
+    throw error;
+  }
+}
+
 async function commandDelete(state, query, flags) {
   if (query.length === 0) {
     print("Which lite context should I delete?");
@@ -866,6 +938,10 @@ async function run() {
     await commandDisconnect(state);
     return;
   }
+  if (command === "export") {
+    await commandExport(state, query, flags);
+    return;
+  }
   if (command === "delete") {
     await commandDelete(state, query, flags);
     return;
@@ -880,7 +956,7 @@ async function run() {
   }
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | disconnect | create | save | import | delete | mode | alias | describe."
+      "Use: status | list | use | disconnect | create | save | import | export | delete | mode | alias | describe."
   );
 }
 

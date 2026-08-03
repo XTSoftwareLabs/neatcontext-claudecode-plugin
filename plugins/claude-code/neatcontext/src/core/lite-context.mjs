@@ -728,6 +728,112 @@ export async function importCapturedLite({ bundleFolder, name }) {
   });
 }
 
+function isInside(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+// Kept separate so the torn-copy guard is directly testable: the race it catches
+// — a hand edit landing while the bundle is being copied — cannot be staged
+// deterministically through the command line.
+export function requireUnchangedExport(record, before, after) {
+  if (before !== after) {
+    throw new LiteContextError(
+      `The "${record.name}" context changed while it was being exported. Run the export again.`
+    );
+  }
+}
+
+// Copies a saved context's bundle to a folder the user picks. A conversation
+// context is already portable — relative paths, generated knowledge inside the
+// bundle — so export is a copy rather than a conversion, and what lands is
+// exactly the shape `importCapturedLite` reads back.
+//
+// A `/create` context is refused instead of half-exported. Its knowledge is a
+// folder this plugin references but does not own, so carrying it would mean
+// copying files the user never handed over, and leaving it behind would ship a
+// bundle whose knowledge is silently missing on the other machine.
+export async function exportLite({ record, destination, force = false, routingDescription }) {
+  if (!record) {
+    throw new LiteContextError("No lite context was selected for export.");
+  }
+  if (!record.knowledgeManaged) {
+    throw new LiteContextError(
+      `"${record.name}" links a knowledge folder this plugin does not own ` +
+        `(${record.knowledgeFolder}), so it cannot be exported as a self-contained ` +
+        "bundle. Copy that folder to the other machine yourself and re-create the " +
+        "context there with `/neatcontext:create`. Contexts saved from a conversation " +
+        "own their knowledge and export in full."
+    );
+  }
+
+  const supplied = (destination ?? "").trim();
+  if (supplied.length === 0) {
+    throw new LiteContextError("An export destination folder is required.");
+  }
+  const parent = path.resolve(supplied);
+  if (isInside(record.directory, parent)) {
+    throw new LiteContextError(
+      "The export destination is inside the context being exported. Pick a folder outside it."
+    );
+  }
+  // An exported copy under the lite home would be read back by `listLite` as a
+  // second context carrying the same id, which makes `use` and `delete`
+  // ambiguous. Export writes bundles for elsewhere; import is what brings one in.
+  if (isInside(liteHome(), parent)) {
+    throw new LiteContextError(
+      "The export destination is inside NeatContext's own context storage. Pick a folder " +
+        "outside it — use `/neatcontext:import` to bring a bundle back in."
+    );
+  }
+
+  const target = path.join(parent, path.basename(record.directory));
+  const replacing = await directoryExists(target);
+  if (replacing && !force) {
+    throw new LiteContextError(
+      `${target} already exists. Re-run the export with --force to replace it.`
+    );
+  }
+
+  // The lock is the same one `/save` takes, so an export cannot copy a bundle
+  // that is being replaced underneath it.
+  const release = await acquireUpdateLock(record);
+  const suffix = randomBytes(6).toString("hex");
+  const staging = path.join(parent, `.neatcontext-export-${suffix}`);
+  const backup = path.join(parent, `.neatcontext-export-backup-${suffix}`);
+  try {
+    await mkdir(parent, { recursive: true });
+    const before = await fingerprintLite(record);
+    await cp(record.directory, staging, { recursive: true, errorOnExist: true, force: false });
+
+    // The lock stops a concurrent save; this catches a hand edit made while the
+    // copy was running, which would otherwise publish a torn bundle.
+    requireUnchangedExport(record, before, await fingerprintLite(record));
+
+    const useWhen = (routingDescription ?? "").trim();
+    if (useWhen.length > 0) {
+      const manifestPath = path.join(staging, "context.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      if (manifest.routingDescription !== useWhen) {
+        manifest.routingDescription = useWhen;
+        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      }
+    }
+
+    if (replacing) {
+      await replaceLiteDirectory(target, staging, backup);
+    } else {
+      await rename(staging, target);
+    }
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    await release();
+  }
+
+  const { files } = await listKnowledgeFiles(path.join(target, "knowledge"));
+  return { record, destination: target, knowledgeFileCount: files.length, replaced: replacing };
+}
+
 // Removes the context directory. A `/create` context only points at the user's
 // knowledge folder, so that folder is left alone. A `/save` context owns its
 // generated knowledge inside this directory, so it is removed with the bundle.
