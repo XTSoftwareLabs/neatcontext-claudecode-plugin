@@ -299,11 +299,14 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
     readme,
     /\[NeatContext for GitHub Copilot\]\(plugins\/copilot\/neatcontext\/README\.md\)/
   );
+  // The marketplace is the one documented install route. Its entry is what
+  // names the plugin, so the documented commands only stay right while the
+  // README keeps pointing at this index rather than a direct path install.
+  assert.match(copilotReadme, /copilot plugin marketplace add XTSoftwareLabs\/neatcontext-plugins/);
   assert.match(
     copilotReadme,
-    /copilot plugin install XTSoftwareLabs\/neatcontext-plugins:plugins\/copilot\/neatcontext/
+    new RegExp(`copilot plugin install ${copilotEntry.name}@${copilotMarketplace.name}`)
   );
-  assert.match(copilotReadme, /chat\.plugins\.enabled/);
   assert.match(copilotReadme, /\[Privacy Policy\]\(\.\.\/\.\.\/\.\.\/PRIVACY\.md\)/);
 });
 
