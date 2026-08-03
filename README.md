@@ -5,9 +5,9 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](package.json)
 [![License](https://img.shields.io/github/license/XTSoftwareLabs/neatcontext-plugins)](LICENSE)
 
-Extract domain knowledge and save useful work from Claude Code, Kimi Code,
-Codex, or pi conversations as structured, reusable context that you can use in
-later sessions or share with others.
+Extract domain knowledge and save useful work from Claude Code, GitHub Copilot,
+Kimi Code, Codex, or pi conversations as structured, reusable context that you
+can use in later sessions or share with others.
 
 ![NeatContext Claude Code demo](assets/neatcontext_claude_code_demo.gif)
 
@@ -45,6 +45,14 @@ from what one person learned.
 claude plugin marketplace add https://github.com/XTSoftwareLabs/neatcontext-plugins.git
 claude plugin install neatcontext@neatcontext --scope user
 ```
+
+### GitHub Copilot (CLI and VS Code)
+
+```bash
+copilot plugin install XTSoftwareLabs/neatcontext-plugins:plugins/copilot/neatcontext
+```
+
+See [NeatContext for GitHub Copilot](plugins/copilot/neatcontext/README.md).
 
 ### Kimi Code
 
