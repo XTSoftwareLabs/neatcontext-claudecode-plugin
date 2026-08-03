@@ -54,21 +54,13 @@ The plugins handle information only when needed to provide their features:
 - **Desktop companion connection details:** the local port and bearer token
   written by the NeatContext desktop app. The active plugin reads these details
   to authenticate requests to the loopback companion service.
-- **Save-nudge counters (Claude Code only):** to detect a good moment to
-  *offer* saving, a hook scans newly appended lines of the host's own session
-  transcript once per assistant turn and retains only this whitelist: tool
-  names, whether a tool call reported an error, the first words of shell
-  commands (for example `git commit`), 16-character hashes of edited file
-  paths, message token counts, the transcript's size in bytes, and whether a
-  fixed proposal marker line appeared. Message text, command arguments, file
-  contents, and edited file paths are not stored by the nudge; everything
-  outside the whitelist is discarded as soon as the line is read. The
-  host-supplied transcript path is stored separately as described above. The
-  counters are kept in the local routing state file and the nudge only ever
-  asks — transcript evidence is read only after the user invokes save, and a
-  save still happens exclusively through the save command's validation and,
-  for updates, preview-and-confirm flow. Setting the routing mode to `manual`
-  disables the nudge but does not disable an explicit save.
+Earlier versions of the Claude Code plugin also kept save-nudge counters,
+derived from the host transcript, so the plugin could decide when to *offer*
+saving. That feature has been removed: nothing observes a session to judge when
+to save, no counters are derived from the transcript, and the plugin never
+proposes a save on its own. Saving happens only when the user runs
+`/neatcontext:save`. Any counters left in the local routing state file by an
+older build are discarded the next time that session is written.
 
 The plugins do not intentionally collect account credentials, payment
 information, advertising identifiers, or precise location information.

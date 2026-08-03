@@ -1,9 +1,9 @@
-// The GitHub Copilot plugin is a thin fork of the claude-code plugin: hooks
-// and src/core reused verbatim, commands ported, and a lite-only host adapter
-// in src/copilot. These tests pin the fork's three contracts: what must stay
-// byte-identical to claude-code, what must never leave the machine (no
-// companion HTTP), and how sessions scope to workspaces on hosts that expose
-// no session identity.
+// The GitHub Copilot plugin is a thin fork of the claude-code plugin: src/core
+// reused verbatim, commands ported, and a lite-only host adapter in src/copilot.
+// These tests pin the fork's contracts: what must stay byte-identical to
+// claude-code, what must never leave the machine (no companion HTTP), how
+// sessions scope to workspaces on hosts that expose no session identity, and
+// that nothing here runs on its own.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -241,7 +241,6 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   assert.equal(plugin.displayName, "NeatContext");
   assert.equal(plugin.version, packageJson.version);
   assert.equal(plugin.license, "MIT");
-  assert.equal(plugin.hooks, "./hooks/hooks.json");
   assert.match(
     bridgeText,
     new RegExp(
@@ -254,7 +253,6 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   assert.deepEqual(server.args, ["${CLAUDE_PLUGIN_ROOT}/src/copilot/mcp-bridge.mjs"]);
   const prefix = "${CLAUDE_PLUGIN_ROOT}/";
   assert.ok((await stat(path.join(pluginRoot, server.args[0].slice(prefix.length)))).isFile());
-  assert.ok((await stat(path.join(pluginRoot, plugin.hooks.slice(2)))).isFile());
 
   const entry = marketplace.plugins.find((candidate) => candidate.name === "neatcontext-copilot");
   assert.ok(entry, "marketplace.json must carry the copilot plugin entry");
@@ -293,17 +291,18 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   assert.match(copilotReadme, /\[Privacy Policy\]\(\.\.\/\.\.\/\.\.\/PRIVACY\.md\)/);
 });
 
-// The hooks' fail-silent design is what makes shipping them on Copilot safe at
-// all, and src/core is a synced copy by repo convention. Any divergence is a
-// fork starting to drift; it has to be deliberate, and it has to show up here.
-test("Copilot plugin reuses the claude-code hooks and core verbatim", async () => {
-  const verbatim = [
-    ["hooks", "hooks.json"],
-    ["hooks", "stop.mjs"],
-    ["hooks", "pre-compact.mjs"],
-    ...(await readdir(path.join(claudeRoot, "src", "core"))).map((name) => ["src", "core", name])
-  ];
-  for (const parts of verbatim) {
+// src/core is a synced copy by repo convention. Copilot ships a subset of it —
+// the modules that exist only to serve Claude-specific commands are not copied
+// — so the invariant is over what Copilot does ship: every one of those files
+// must still match claude-code's byte for byte. A fork starting to drift has to
+// show up here.
+test("Copilot plugin reuses the claude-code core verbatim", async () => {
+  const shared = await readdir(path.join(pluginRoot, "src", "core"));
+  assert.ok(shared.includes("lite-context.mjs"), "the copied core must include lite-context");
+  assert.ok(shared.includes("routing.mjs"), "the copied core must include routing");
+
+  for (const name of shared) {
+    const parts = ["src", "core", name];
     const [ours, theirs] = await Promise.all([
       readFile(path.join(pluginRoot, ...parts), "utf8"),
       readFile(path.join(claudeRoot, ...parts), "utf8")
@@ -584,42 +583,21 @@ test("Copilot MCP bridge hides the routing tools in manual mode", async (t) => {
   assert.deepEqual(tools.result.tools.map((tool) => tool.name), ["get_context"]);
 });
 
-// The nudge hooks ship verbatim, so all that is left to verify on the Copilot
-// layout is the reuse contract itself: whatever a host feeds them, they exit 0
-// with no output rather than break stopping or compaction.
-test("Copilot hooks stay silent on hostile or absent host contracts", async () => {
-  const stopHook = path.join(pluginRoot, "hooks", "stop.mjs");
-  const preCompactHook = path.join(pluginRoot, "hooks", "pre-compact.mjs");
-  const home = await isolatedHome("neatcontext-copilot-hooks-");
+// Copilot ships no hooks at all: nothing runs on its own, so there is nothing
+// that could prompt the user or fire on a schedule. Saving is the /neatcontext:save
+// command and nothing else.
+test("Copilot plugin registers no hooks and nothing that runs on its own", async () => {
+  const plugin = JSON.parse(
+    await readFile(path.join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")
+  );
+  assert.equal(plugin.hooks, undefined, "the copilot manifest must declare no hooks");
 
-  const cases = [
-    ["", "empty stdin"],
-    ["not json", "non-JSON stdin"],
-    ["{}", "no session_id"],
-    [JSON.stringify({ session_id: "copilot-hook-a" }), "no transcript_path"]
-  ];
-  for (const hook of [stopHook, preCompactHook]) {
-    for (const [input, label] of cases) {
-      const result = await new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, [hook], {
-          cwd: pluginRoot,
-          env: { ...process.env, ...home.env },
-          stdio: ["pipe", "pipe", "pipe"],
-          windowsHide: true
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout.setEncoding("utf8");
-        child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk) => (stdout += chunk));
-        child.stderr.on("data", (chunk) => (stderr += chunk));
-        child.once("error", reject);
-        child.once("close", (code) => resolve({ code, stdout, stderr }));
-        child.stdin.end(input);
-      });
-      assert.equal(result.code, 0, `${path.basename(hook)} must exit 0 on ${label}`);
-      assert.equal(result.stdout, "", `${path.basename(hook)} must stay silent on ${label}`);
-      assert.equal(result.stderr, "", `${path.basename(hook)} must not warn on ${label}`);
-    }
-  }
+  const entries = await readdir(pluginRoot);
+  assert.ok(!entries.includes("hooks"), "the copilot plugin must ship no hooks directory");
+
+  const sources = await readdir(path.join(pluginRoot, "src", "core"));
+  assert.ok(!sources.includes("save-nudge.mjs"), "the save nudge must be gone");
+
+  const cliText = await readFile(cli, "utf8");
+  assert.doesNotMatch(cliText, /save-nudge|noteSaved/);
 });
