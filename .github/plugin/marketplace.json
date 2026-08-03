@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Save GitHub Copilot work as reusable, domain-aware context",
-    "version": "0.2.6"
+    "version": "0.2.7"
   },
   "plugins": [
     {
       "name": "neatcontext",
       "description": "Save GitHub Copilot work as reusable, domain-aware context",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "source": "./plugins/copilot/neatcontext"
     }
   ]
