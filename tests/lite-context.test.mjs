@@ -606,4 +606,16 @@ describe("lite and standard side by side", () => {
     assert.match(output, /NeatContext desktop app/);
     assert.deepEqual(companion.state.contexts.length, 2);
   });
+
+  // A standard context's files are the desktop app's, in a store this plugin
+  // never reads. Naming one is a reasonable thing for a user to try, so it gets
+  // the specific answer rather than "no context matched".
+  it("refuses to export a standard context", async () => {
+    const destination = path.join(home, "exports-standard");
+    const output = await cli("export", "payment team", "--to", destination);
+    assert.match(output, /is a standard context/);
+    assert.match(output, /Only lite contexts can be exported/);
+    assert.match(output, /NeatContext desktop app/);
+    await assert.rejects(() => readdir(destination));
+  });
 });

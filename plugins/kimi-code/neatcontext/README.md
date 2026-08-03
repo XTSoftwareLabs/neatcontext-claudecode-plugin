@@ -40,6 +40,7 @@ Then run `/reload`
 - `/neatcontext:status` — show the selection and routing mode.
 - `/neatcontext:create` — create a lite context around an existing knowledge folder.
 - `/neatcontext:import [folder]` — import a shared lite-context bundle.
+- `/neatcontext:export [name] [folder]` — export a saved context as a shareable bundle.
 - `/neatcontext:delete [name or number]` — preview and delete a lite context.
 - `/neatcontext:mode [auto|ask|manual]` — show or change routing behavior.
 

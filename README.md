@@ -182,6 +182,20 @@ local copy and leaves the shared folder unchanged.
 
 After importing, connect it with `/neatcontext:use <name>`.
 
+### `/neatcontext:export [name] [folder]`
+
+Copy a lite context saved from a conversation into a self-contained bundle
+folder, so it can be moved to another machine or handed to a teammate and
+brought in with `/neatcontext:import`. A subfolder named after the context is
+created inside the folder you give, and the context itself is unchanged.
+
+Lite contexts are shared between AI coding clients by living in one folder on
+one machine, so export is what carries one beyond it.
+
+A context created with `/neatcontext:create` cannot be exported: it links a
+knowledge folder the plugin does not own, so there is nothing self-contained to
+hand over. Copy that folder across yourself and re-create the context there.
+
 ### `/neatcontext:delete [name or number]`
 
 Delete a lite context after confirmation. Standard contexts must be deleted in
