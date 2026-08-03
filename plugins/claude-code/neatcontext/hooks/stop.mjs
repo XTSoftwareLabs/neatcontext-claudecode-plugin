@@ -1,160 +1,56 @@
-// Stop hook: once per assistant turn, ask "is this a moment worth proposing a
-// save?" — and when it is, block the stop so the session's model can decide
-// whether there is actually anything durable to offer.
+// Stop hook: record where Claude keeps this session's transcript, and nothing
+// else.
 //
-// This process has no model (see save-nudge.mjs). It updates counters from the
-// transcript delta under the whitelist stated in PRIVACY.md, runs the pure
-// gate, and either exits quietly or hands the host a Stop `additionalContext`
-// payload. The nudge is an enhancement: any failure here must end in a silent
-// exit 0, never in a turn that cannot stop.
+// This hook used to evaluate whether the moment was worth proposing a save, and
+// hand the model an instruction to ask. That behavior is gone — saving is
+// user-initiated through `/neatcontext:save`. Deciding when to save on the
+// user's behalf produced prompts they had not asked for, so nothing here
+// watches, scores, or proposes anything.
+//
+// The one job left exists because Claude passes the transcript location to
+// hooks and to no other plugin process. `/neatcontext:save` needs it to compile
+// its ephemeral, privacy-filtered evidence view, so it is recorded here. The
+// path only — no transcript content is read or stored by this hook.
+//
+// This process writes nothing to stdout, ever. A hook that prints is a hook the
+// user sees, and there is no longer anything worth showing them.
 
-import { open, stat } from "node:fs/promises";
 import { configureSessionId } from "../src/core/session.mjs";
-import { readSelection } from "../src/core/companion-client.mjs";
-import { readRouting, resolveMode, updateRouting } from "../src/core/routing.mjs";
-import {
-  evaluateSaveNudge,
-  ingestTranscriptText,
-  normalizeSaveState,
-  proposalInstruction,
-  rememberTranscriptPath
-} from "../src/core/save-nudge.mjs";
+import { updateRouting } from "../src/core/routing.mjs";
+import { normalizeSaveState, rememberTranscriptPath } from "../src/core/session-state.mjs";
 
-// Reading the delta caps at this many bytes: a first run against a transcript
-// that is already huge skips ahead rather than parsing megabytes on the hook's
-// clock.
-const MAX_DELTA_BYTES = 8 * 1024 * 1024;
-
-async function readStdin() {
+async function main() {
   let raw = "";
   for await (const chunk of process.stdin) {
     raw += chunk;
   }
-  return JSON.parse(raw);
-}
-
-// New complete lines since `offset`. The offset only ever advances past a
-// final newline, so a line the host is mid-write on is re-read next turn.
-async function readDelta(file, offset) {
-  const info = await stat(file);
-  // A smaller file than last time is a different file — a resumed session or
-  // a rotated transcript. Counting is best restarted, not continued.
-  let from = info.size < offset ? 0 : offset;
-  if (info.size - from > MAX_DELTA_BYTES) {
-    from = info.size - MAX_DELTA_BYTES;
-  }
-  const handle = await open(file, "r");
-  try {
-    const buffer = Buffer.alloc(info.size - from);
-    await handle.read(buffer, 0, buffer.length, from);
-    const lastNewline = buffer.lastIndexOf(0x0a);
-    if (lastNewline === -1) {
-      return { text: "", offset: from, size: info.size };
-    }
-    return {
-      text: buffer.subarray(0, lastNewline + 1).toString("utf8"),
-      offset: from + lastNewline + 1,
-      size: info.size
-    };
-  } finally {
-    await handle.close();
-  }
-}
-
-async function main() {
-  const input = await readStdin();
-  // The guard the host provides against a block loop: a continuation this hook
-  // already forced must always be allowed to stop.
-  if (input.stop_hook_active) return;
-  const id = typeof input.session_id === "string" && input.session_id.trim() ? input.session_id.trim() : null;
+  const input = JSON.parse(raw);
+  const id =
+    typeof input.session_id === "string" && input.session_id.trim()
+      ? input.session_id.trim()
+      : null;
   if (!id) return;
   configureSessionId(() => id);
 
-  const routing = await readRouting();
-  const mode = resolveMode(routing, id);
-  const save = normalizeSaveState(routing.sessions[id]?.save);
-  rememberTranscriptPath(save, input.transcript_path);
-  save.turns += 1;
-
-  // The update-merge signal needs to know what "since it was connected" means.
-  const selection = await readSelection().catch(() => null);
-  const liteConnectedName = selection?.kind === "lite" ? selection.contextName : null;
-  const connectedId = selection?.kind === "lite" ? selection.contextId : null;
-  if (connectedId !== save.connectedId) {
-    save.connectedId = connectedId;
-    save.writesAtConnect = save.writes;
-  }
-
-  let markerSeen = false;
-  if (typeof input.transcript_path === "string" && input.transcript_path.length > 0) {
-    try {
-      const delta = await readDelta(input.transcript_path, save.transcriptOffset);
-      markerSeen = ingestTranscriptText(save, delta.text);
-      save.transcriptOffset = delta.offset;
-      save.transcriptBytes = delta.size;
-    } catch {
-      // No transcript is no signal, not an error: turn counting still works.
-    }
-  }
-
-  const outcomes = [];
-  // A fire from last turn resolves now: the marker in the delta means the user
-  // saw a proposal — the session's one visible ask is spent. No marker means
-  // the model judged there was nothing durable; that silence re-arms the gate
-  // and is exactly the calibration evidence the thresholds are waiting for.
-  if (save.awaitingMarker) {
-    save.awaitingMarker = false;
-    if (markerSeen) {
-      save.proposalVisible = true;
-      save.proposedAt = new Date().toISOString();
-      outcomes.push({ kind: "save-nudge", outcome: "proposed" });
-    } else {
-      outcomes.push({ kind: "save-nudge", outcome: "silent" });
-    }
-  }
-
-  const verdict = evaluateSaveNudge(save, { mode, liteConnectedName });
-  if (verdict.fire) {
-    save.fires += 1;
-    save.writesAtFire = save.writes;
-    save.awaitingMarker = true;
-    // Completion beats are spent by the fire they earned: "just landed" is
-    // only true once, and a re-fire has to be earned by something new.
-    save.commitLanded = false;
-    save.redGreen = false;
-    outcomes.push({ kind: "save-nudge", outcome: "fired", tier: verdict.tier, reasons: verdict.reasons });
-  }
-  // Armed for one evaluation only: a compaction from hours ago must not read
-  // as "just compacted" on some later turn.
-  save.compactPending = false;
+  const save = normalizeSaveState({});
+  if (!rememberTranscriptPath(save, input.transcript_path)) return;
 
   await updateRouting((state) => {
-    state.sessions[id] = { ...state.sessions[id], save, updatedAt: new Date().toISOString() };
-    for (const outcome of outcomes) {
-      state.decisions.push({ at: new Date().toISOString(), sessionShort: id.slice(0, 8), ...outcome });
+    // Already recorded: skip the write rather than rewriting the routing file
+    // on every turn of every session, which is what used to age other sessions
+    // out of it.
+    if (normalizeSaveState(state.sessions[id]?.save).transcriptPath === save.transcriptPath) {
+      return;
     }
+    state.sessions[id] = {
+      ...state.sessions[id],
+      save,
+      updatedAt: new Date().toISOString()
+    };
   });
-
-  // `additionalContext`, not `{decision: "block", reason}`. A block's `reason`
-  // is delivered as a user-role message prefixed "Stop hook feedback:", so the
-  // host prints this entire instruction in the transcript — the user reads the
-  // prompt meant for the model, every word of it, before the ask it produces.
-  // `additionalContext` reaches the model out of band and appears nowhere in
-  // the conversation, while still granting the turn the ask needs. The host
-  // marks that turn `stop_hook_active`, so the guard above still applies.
-  if (verdict.fire) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "Stop",
-          additionalContext: proposalInstruction({ reasons: verdict.reasons, liteConnectedName })
-        }
-      })
-    );
-  }
 }
 
-// A truthful exit either way: exit 0 with no output is "nothing to propose",
-// and a crash must look the same — the nudge never gets to break stopping.
-// No process.exit(): it can truncate a stdout write still in flight.
+// A truthful exit either way: this is bookkeeping, and a crash must look the
+// same as a quiet success — recording a path is never worth failing a stop
+// over. No process.exit(): it can truncate work still in flight.
 main().catch(() => undefined);

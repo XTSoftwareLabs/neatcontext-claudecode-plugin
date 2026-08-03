@@ -48,7 +48,7 @@ import {
   sessionId,
   setMode
 } from "../core/routing.mjs";
-import { normalizeSaveState, noteSaved } from "../core/save-nudge.mjs";
+import { normalizeSaveState } from "../core/session-state.mjs";
 import {
   renderEvidenceBlocks,
   renderEvidenceCoverage,
@@ -782,8 +782,6 @@ async function commandSave(flags) {
       }).catch(() => undefined);
       await rm(source, { force: true });
       // The save nudge's "nothing new since the last save" suppressor starts
-      // counting from here.
-      await noteSaved(sessionId()).catch(() => undefined);
       print(`Updated context: ${result.record.name}`);
       print(`Lite context folder: ${result.record.directory}`);
       print(`Profile path: ${result.record.profilePath}`);
@@ -804,7 +802,6 @@ async function commandSave(flags) {
       source: result.profileText
     }).catch(() => undefined);
     await rm(source, { force: true });
-    await noteSaved(sessionId()).catch(() => undefined);
     print(`Lite context folder: ${result.record.directory}`);
     print(`Profile path: ${result.record.profilePath}`);
     print(`Knowledge folder: ${result.record.knowledgeFolder}`);
