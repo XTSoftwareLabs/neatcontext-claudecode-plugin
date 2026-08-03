@@ -365,14 +365,21 @@ describe("ingesting the transcript delta", () => {
 // --- the Stop hook ---------------------------------------------------------------
 
 describe("the Stop hook", () => {
-  it("blocks with the ask when a commit lands, and records the fire", async () => {
+  // The payload shape is load-bearing, not incidental. A block's `reason` is
+  // replayed to the user as a "Stop hook feedback:" message, which would print
+  // this whole instruction in the transcript; `additionalContext` reaches only
+  // the model. Asserting the field keeps the leak from coming back.
+  it("delivers the ask as model-only context when a commit lands, and records the fire", async () => {
     const transcript = await writeTranscript(commitLines);
     const { out, code } = await stop("s1", transcript);
     assert.equal(code, 0);
     const output = JSON.parse(out);
-    assert.equal(output.decision, "block");
-    assert.match(output.reason, /commit or pull request just landed/);
-    assert.match(output.reason, /Worth saving this session\?/);
+    assert.equal(output.decision, undefined);
+    assert.equal(output.reason, undefined);
+    assert.equal(output.hookSpecificOutput.hookEventName, "Stop");
+    const instruction = output.hookSpecificOutput.additionalContext;
+    assert.match(instruction, /commit or pull request just landed/);
+    assert.match(instruction, /Worth saving this session\?/);
 
     const save = await saveState("s1");
     assert.equal(save.fires, 1);
@@ -386,7 +393,10 @@ describe("the Stop hook", () => {
     await connectLite("s-lite");
     const transcript = await writeTranscript(commitLines);
     const { out } = await stop("s-lite", transcript);
-    assert.match(JSON.parse(out).reason, /update "Payments Runbooks" with \/neatcontext:save/);
+    assert.match(
+      JSON.parse(out).hookSpecificOutput.additionalContext,
+      /update "Payments Runbooks" with \/neatcontext:save/
+    );
   });
 
   it("stays quiet with nothing worth proposing", async () => {
@@ -408,7 +418,10 @@ describe("the Stop hook", () => {
 
   it("spends the session's one visible proposal when the marker appears", async () => {
     const transcript = await writeTranscript(commitLines);
-    assert.equal(JSON.parse((await stop("s4", transcript)).out).decision, "block");
+    assert.equal(
+      JSON.parse((await stop("s4", transcript)).out).hookSpecificOutput.hookEventName,
+      "Stop"
+    );
 
     // The model proposed; the marker is in the next delta.
     await writeFile(
@@ -443,7 +456,10 @@ describe("the Stop hook", () => {
 
   it("re-arms after model silence, but only once the session moves on", async () => {
     const transcript = await writeTranscript(commitLines);
-    assert.equal(JSON.parse((await stop("s5", transcript)).out).decision, "block");
+    assert.equal(
+      JSON.parse((await stop("s5", transcript)).out).hookSpecificOutput.hookEventName,
+      "Stop"
+    );
 
     // No marker in the next delta: the model judged nothing durable.
     assert.equal((await stop("s5", transcript)).out, "", "same evidence does not re-fire");
@@ -461,7 +477,10 @@ describe("the Stop hook", () => {
         .map((line) => `${line}\n`)
         .join("")
     );
-    assert.equal(JSON.parse((await stop("s5", transcript)).out).decision, "block");
+    assert.equal(
+      JSON.parse((await stop("s5", transcript)).out).hookSpecificOutput.hookEventName,
+      "Stop"
+    );
     assert.equal((await saveState("s5")).fires, 2);
   });
 
@@ -503,7 +522,7 @@ describe("the PreCompact hook", () => {
       assistantLine([toolUse("Edit", { file_path: "/repo/a.mjs" })])
     ]);
     const { out } = await stop("s8", transcript);
-    assert.match(JSON.parse(out).reason, /just compacted/);
+    assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /just compacted/);
     // Consumed: a compaction from earlier must not read as "just compacted" later.
     assert.equal((await saveState("s8")).compactPending, false);
   });

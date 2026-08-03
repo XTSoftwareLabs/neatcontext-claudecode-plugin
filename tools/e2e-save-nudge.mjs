@@ -7,8 +7,9 @@
 // assumptions:
 //
 //   1. Stop hook input carries session_id, transcript_path, stop_hook_active.
-//   2. {"decision": "block", "reason"} forces a continuation the model can
-//      read, and the follow-up Stop arrives with stop_hook_active: true.
+//   2. hookSpecificOutput.additionalContext forces a continuation the model can
+//      read, the follow-up Stop arrives with stop_hook_active: true, and the
+//      text never enters the conversation as a message the user would read.
 //   3. The real transcript contains the usage fields and tool shapes the
 //      whitelist ingestion reads.
 //   4. The shipped hooks, wired end to end, record a fire and deliver the ask
@@ -31,6 +32,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Distinctive enough that finding it anywhere in the event stream means the
+// host replayed the hook's payload rather than keeping it model-only.
+const PROBE_MARKER = "NUDGEPROBEMARKER";
 const stopHook = path.join(repo, "plugins", "claude-code", "neatcontext", "hooks", "stop.mjs");
 const keep = process.argv.includes("--keep");
 
@@ -160,8 +164,9 @@ async function probeStopContract(root) {
   const once = path.join(dir, "blocked-once");
   await mkdir(dir, { recursive: true });
 
-  // Logs every Stop input it sees; blocks exactly once, with a reason the
-  // model can only satisfy by having read it.
+  // Logs every Stop input it sees; fires exactly once, with an instruction the
+  // model can only satisfy by having read it. The marker rides along so the
+  // visibility assertion below can look for it in the event stream.
   const probe = path.join(dir, "probe-stop.mjs");
   await writeFile(
     probe,
@@ -172,7 +177,12 @@ appendFileSync(${JSON.stringify(log)}, raw.replace(/\\n/g, " ") + "\\n");
 const input = JSON.parse(raw);
 if (!input.stop_hook_active && !existsSync(${JSON.stringify(once)})) {
   writeFileSync(${JSON.stringify(once)}, "1");
-  process.stdout.write(JSON.stringify({ decision: "block", reason: "Respond with exactly the single word NUDGEACK and nothing else." }));
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      additionalContext: "${PROBE_MARKER}: respond with exactly the single word NUDGEACK and nothing else."
+    }
+  }));
 }
 `
   );
@@ -180,10 +190,24 @@ if (!input.stop_hook_active && !existsSync(${JSON.stringify(once)})) {
     Stop: [{ hooks: [{ type: "command", command: `node "${probe}"`, timeout: 15 }] }]
   });
 
-  const { out, err } = await claude(["-p", "Reply with exactly: HELLO"], {
-    cwd: dir,
-    env: cleanEnv()
-  });
+  // stream-json exposes what plain -p cannot: whether the host replayed the
+  // hook's text as a conversation message. A blocked Stop does exactly that,
+  // as a user-role turn prefixed "Stop hook feedback:" — which is how the
+  // instruction meant for the model ends up printed to the user.
+  const { out, err } = await claude(
+    ["-p", "Reply with exactly: HELLO", "--output-format", "stream-json", "--verbose"],
+    { cwd: dir, env: cleanEnv() }
+  );
+  const events = out
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{"))
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
 
   const entries = await readJsonl(log);
   const first = entries[0] ?? {};
@@ -196,7 +220,7 @@ if (!input.stop_hook_active && !existsSync(${JSON.stringify(once)})) {
     JSON.stringify(Object.keys(first))
   );
   record(
-    "blocked Stop forces a continuation the model reads (NUDGEACK in output)",
+    "additionalContext forces a continuation the model reads (NUDGEACK in output)",
     out.includes("NUDGEACK"),
     out.trim().slice(-80) || err.trim().slice(-120)
   );
@@ -204,6 +228,16 @@ if (!input.stop_hook_active && !existsSync(${JSON.stringify(once)})) {
     "the follow-up Stop arrives guarded with stop_hook_active: true",
     entries.some((entry) => entry.stop_hook_active === true),
     `stop invocations: ${entries.length}`
+  );
+  // The regression this guards: the model-facing instruction must never become
+  // a conversation message, because the user reads those.
+  const replayed = events.filter((event) => JSON.stringify(event).includes(PROBE_MARKER));
+  record(
+    "the hook's instruction never enters the conversation as a readable message",
+    replayed.length === 0,
+    replayed.length === 0
+      ? "marker absent from the event stream"
+      : `replayed as ${replayed.map((event) => `${event.type}/${event.message?.role ?? "-"}`).join(", ")}`
   );
 
   if (typeof first.transcript_path === "string") {
@@ -282,7 +316,7 @@ async function liveFeature(root) {
   // Only a permission complaint or an unrelated ramble would be a failure.
   const proposed = out.includes("Worth saving this session?");
   record(
-    "the blocked ask reached the model and it took a designed branch",
+    "the injected ask reached the model and it took a designed branch",
     proposed || (Boolean(fired) && !/permission|approve/i.test(out)),
     proposed ? `model proposed live: ${out.trim().slice(-160)}` : `model chose silence: ${out.trim().slice(-60)}`
   );
