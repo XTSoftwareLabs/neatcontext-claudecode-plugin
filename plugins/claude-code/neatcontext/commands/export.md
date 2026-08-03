@@ -1,6 +1,6 @@
 ---
 description: Export a saved context as a bundle folder you can share
-argument-hint: [lite context name] [destination folder]
+argument-hint: "[lite context name] [destination folder]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
