@@ -10,6 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = path.join(root, "shared", "core", "conversation-evidence.mjs");
 const targets = [
   "plugins/claude-code/neatcontext/src/core/conversation-evidence.mjs",
+  "plugins/copilot/neatcontext/src/core/conversation-evidence.mjs",
   "plugins/kimi-code/neatcontext/src/core/conversation-evidence.mjs",
   "plugins/pi/neatcontext/src/core/conversation-evidence.mjs",
   "codex-marketplace/plugins/neatcontext/src/core/conversation-evidence.mjs"
