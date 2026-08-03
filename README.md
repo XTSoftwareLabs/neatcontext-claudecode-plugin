@@ -48,10 +48,6 @@ claude plugin install neatcontext@neatcontext --scope user
 
 ### GitHub Copilot (CLI and VS Code)
 
-```bash
-copilot plugin install XTSoftwareLabs/neatcontext-plugins:plugins/copilot/neatcontext
-```
-
 See [NeatContext for GitHub Copilot](plugins/copilot/neatcontext/README.md).
 
 ### Kimi Code
