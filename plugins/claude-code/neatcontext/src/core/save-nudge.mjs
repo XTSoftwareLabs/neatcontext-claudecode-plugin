@@ -12,9 +12,11 @@
 // The counters here are fed from the host transcript, under a strict
 // whitelist: tool names, result success/failure, the first two words of shell
 // commands, 16-hex hashes of edited file paths, token counts, and the presence
-// of the fixed proposal marker. Nothing else survives the tick that read it —
-// no message text, no command arguments, no paths. PRIVACY.md states the same
-// list to the user.
+// of the fixed proposal marker. Nothing else from a transcript entry survives
+// the tick that read it. The host-provided transcript location is retained as
+// opaque session metadata so the explicit save command can build a temporary,
+// privacy-filtered evidence view; no message text or command arguments are
+// stored here. PRIVACY.md states the same boundary to the user.
 //
 // Every number in SAVE_NUDGE is a guess awaiting calibration. Fires and their
 // outcomes are appended to the routing decisions log, which is the only
@@ -63,6 +65,7 @@ export function emptySaveState() {
     turns: 0,
     writes: 0,
     pathHashes: [],
+    transcriptPath: null,
     transcriptOffset: 0,
     transcriptBytes: 0,
     peakTokens: 0,
@@ -103,11 +106,36 @@ export function normalizeSaveState(raw) {
       clean[key] = value.filter((item) => typeof item === "string");
     } else if (key === "pending" && typeof value === "object" && value !== null) {
       clean.pending = value;
-    } else if ((key === "proposedAt" || key === "lastSaveAt" || key === "connectedId") && typeof value === "string") {
+    } else if (
+      (key === "proposedAt" ||
+        key === "lastSaveAt" ||
+        key === "connectedId" ||
+        key === "transcriptPath") &&
+      typeof value === "string"
+    ) {
       clean[key] = value;
     }
   }
   return clean;
+}
+
+// Claude supplies the transcript location in trusted hook input. Keep only a
+// bounded, single-line pointer: the evidence reader will validate and open it
+// later, and only when the user explicitly invokes /neatcontext:save.
+export function rememberTranscriptPath(save, value) {
+  if (typeof value !== "string") return false;
+  const candidate = value.trim();
+  if (
+    candidate.length === 0 ||
+    candidate.length > 32_768 ||
+    candidate.includes("\0") ||
+    candidate.includes("\r") ||
+    candidate.includes("\n")
+  ) {
+    return false;
+  }
+  save.transcriptPath = candidate;
+  return true;
 }
 
 // A Bash call is routinely a compound — `git add x && git commit -m y` — and

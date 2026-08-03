@@ -16,7 +16,8 @@ import {
   evaluateSaveNudge,
   ingestTranscriptText,
   normalizeSaveState,
-  proposalInstruction
+  proposalInstruction,
+  rememberTranscriptPath
 } from "../src/core/save-nudge.mjs";
 
 // Reading the delta caps at this many bytes: a first run against a transcript
@@ -72,6 +73,7 @@ async function main() {
   const routing = await readRouting();
   const mode = resolveMode(routing, id);
   const save = normalizeSaveState(routing.sessions[id]?.save);
+  rememberTranscriptPath(save, input.transcript_path);
   save.turns += 1;
 
   // The update-merge signal needs to know what "since it was connected" means.

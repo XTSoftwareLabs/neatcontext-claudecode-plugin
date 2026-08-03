@@ -39,7 +39,8 @@ const {
   ingestTranscriptText,
   normalizeSaveState,
   noteSaved,
-  proposalInstruction
+  proposalInstruction,
+  rememberTranscriptPath
 } = await import("../plugins/claude-code/neatcontext/src/core/save-nudge.mjs");
 const { hashSource, readRouting, setMode } = await import(
   "../plugins/claude-code/neatcontext/src/core/routing.mjs"
@@ -353,12 +354,29 @@ describe("ingesting the transcript delta", () => {
   });
 
   it("normalizes hand-broken stored state into something runnable", () => {
-    const clean = normalizeSaveState({ writes: "many", turns: 4, pathHashes: [1, "ok"], nonsense: true });
+    const clean = normalizeSaveState({
+      writes: "many",
+      turns: 4,
+      pathHashes: [1, "ok"],
+      transcriptPath: "/host/session.jsonl",
+      nonsense: true
+    });
     assert.equal(clean.writes, 0);
     assert.equal(clean.turns, 4);
     assert.deepEqual(clean.pathHashes, ["ok"]);
+    assert.equal(clean.transcriptPath, "/host/session.jsonl");
     assert.equal(clean.nonsense, undefined);
     assert.deepEqual(normalizeSaveState(null), emptySaveState());
+  });
+
+  it("retains only a bounded, single-line host transcript pointer", () => {
+    const save = emptySaveState();
+    assert.equal(rememberTranscriptPath(save, "  /host/session.jsonl  "), true);
+    assert.equal(save.transcriptPath, "/host/session.jsonl");
+    for (const invalid of [null, "", "bad\npath", "bad\rpath", `x${"y".repeat(32_768)}`, "bad\0path"]) {
+      assert.equal(rememberTranscriptPath(save, invalid), false);
+    }
+    assert.equal(save.transcriptPath, "/host/session.jsonl");
   });
 });
 
@@ -384,6 +402,7 @@ describe("the Stop hook", () => {
     const save = await saveState("s1");
     assert.equal(save.fires, 1);
     assert.equal(save.awaitingMarker, true);
+    assert.equal(save.transcriptPath, transcript);
     const { decisions } = await readRouting();
     assert.equal(decisions.at(-1).kind, "save-nudge");
     assert.equal(decisions.at(-1).outcome, "fired");
@@ -514,8 +533,15 @@ describe("the Stop hook", () => {
 
 describe("the PreCompact hook", () => {
   it("arms the post-compact turn, once", async () => {
-    await runHook(preCompactHook, { session_id: "s8", trigger: "auto", hook_event_name: "PreCompact" });
+    const compactTranscript = path.join(home, "compact-session.jsonl");
+    await runHook(preCompactHook, {
+      session_id: "s8",
+      transcript_path: compactTranscript,
+      trigger: "auto",
+      hook_event_name: "PreCompact"
+    });
     assert.equal((await saveState("s8")).compactPending, true);
+    assert.equal((await saveState("s8")).transcriptPath, compactTranscript);
 
     // One quiet edit is enough once compaction is the reason.
     const transcript = await writeTranscript([

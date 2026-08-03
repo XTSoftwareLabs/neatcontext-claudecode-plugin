@@ -94,6 +94,8 @@ The runtime is split at the host boundary:
 .claude-plugin/
 └── marketplace.json                repository-level Claude marketplace catalog
 kimi.plugin.json                    repository-level Kimi Code plugin manifest
+shared/
+└── core/                           canonical cross-host source copied into packages
 plugins/
 ├── claude-code/
 │   └── neatcontext/                complete installable Claude plugin
@@ -121,7 +123,7 @@ plugins/
         │   └── pi/                 in-process runtime and session adapter
         └── tests/                  this package's own integration tests
 tests/                              core and host integration coverage
-tools/                              development and end-to-end utilities
+tools/                              sync, coverage, and end-to-end utilities
 ```
 
 Each host plugin's `src/core/` must not import from its host directory or read
@@ -131,3 +133,10 @@ operations. Keep host wording, command conventions, manifests, and process
 startup in the host directory. An installed plugin cannot reach outside its own
 directory, so any shared source must be packaged into each host plugin at release
 time.
+
+`shared/core/conversation-evidence.mjs` is the canonical source for the
+host-neutral conversation-evidence projector. After editing it, run
+`npm run sync:evidence`; this updates the packaged Claude, Kimi, pi, and Codex
+copies. `npm run check` includes a byte-for-byte drift check. Host trace parsers
+belong in their host directories and emit the shared semantic-block contract;
+do not add host transcript formats or environment variables to the shared file.

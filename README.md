@@ -140,6 +140,13 @@ conversation knowledge. For a context created with `/neatcontext:create`, its
 linked knowledge folder remains untouched; conversation-derived additions are
 stored inside the lite-context bundle.
 
+In Claude Code, saving compiles the host's current session transcript into an
+ephemeral, privacy-filtered evidence view so earlier work can still be recovered
+after compaction. The model progressively sees a bounded overview, focused
+literal searches, and only the sanitized blocks it needs; NeatContext does not
+save a transcript view. See the
+[conversation-evidence design](docs/conversation-evidence.md).
+
 Use this after a conversation has produced decisions, plans, troubleshooting
 results, implementation notes, or other work worth preserving and reusing later.
 
@@ -273,6 +280,12 @@ app installed and open while using a standard context.
   updating from a conversation first creates a gitignored
   `.neatcontext-capture-*.json` scratch file in the current project and removes
   it after a successful save.
+- Claude Code hooks retain the host-provided current transcript path in bounded
+  local routing state. Transcript content is read only after an explicit save,
+  through a bundled reader that drops high-risk payloads and applies
+  best-effort secret redaction. It creates no plugin-owned transcript index or
+  compiled-view file; Claude Code may retain its output as part of the host
+  session transcript.
 - A connected context's profile and selected knowledge files are read into the
   active coding session when its model uses them. They are then handled like
   other content supplied to that coding host. Standard-context extension tools

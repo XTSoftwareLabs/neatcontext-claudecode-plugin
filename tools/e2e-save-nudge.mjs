@@ -19,14 +19,17 @@
 //      shell in between.
 //   6. Installed as a real plugin, ${CLAUDE_PLUGIN_ROOT} resolves inside
 //      `args` and the hook actually runs.
+//   7. The installed plugin is healthy, and a real /neatcontext:save uses the
+//      evidence projection to create a redacted, reusable lite context.
 //
 // Local-only, deliberately not named *.test.mjs: it needs an authenticated
 // claude CLI and spends a few small model calls. Run it by hand before a
-// release: node tools/e2e-save-nudge.mjs [--keep]
+// release: node tools/e2e-save-nudge.mjs [--keep] [--installed-only]
 
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +40,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROBE_MARKER = "NUDGEPROBEMARKER";
 const stopHook = path.join(repo, "plugins", "claude-code", "neatcontext", "hooks", "stop.mjs");
 const keep = process.argv.includes("--keep");
+const installedOnly = process.argv.includes("--installed-only");
 
 const results = [];
 const record = (name, ok, detail = "") => {
@@ -231,7 +235,10 @@ if (!input.stop_hook_active && !existsSync(${JSON.stringify(once)})) {
   );
   // The regression this guards: the model-facing instruction must never become
   // a conversation message, because the user reads those.
-  const replayed = events.filter((event) => JSON.stringify(event).includes(PROBE_MARKER));
+  const replayed = events.filter(
+    (event) =>
+      event.message?.role === "user" && JSON.stringify(event.message.content).includes(PROBE_MARKER)
+  );
   record(
     "the hook's instruction never enters the conversation as a readable message",
     replayed.length === 0,
@@ -417,6 +424,34 @@ appendFileSync(${JSON.stringify(log)}, JSON.stringify({
 // substitutes ${CLAUDE_PLUGIN_ROOT} inside `args`. If it did not, node would
 // be handed a literal placeholder and the hook would silently never run —
 // exactly the failure a hand-wired test cannot see.
+async function findLiteContext(home, name) {
+  const lite = path.join(home, "lite");
+  for (const entry of await readdir(lite, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(lite, entry.name);
+    try {
+      const manifest = JSON.parse(await readFile(path.join(directory, "context.json"), "utf8"));
+      if (manifest.name === name) return directory;
+    } catch {
+      // A malformed unrelated directory is not the bundle this phase created.
+    }
+  }
+  return null;
+}
+
+async function readTextTree(directory) {
+  let text = "";
+  for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      text += await readTextTree(target);
+    } else if (entry.isFile()) {
+      text += `\n${await readFile(target, "utf8").catch(() => "")}`;
+    }
+  }
+  return text;
+}
+
 async function installedPlugin(root) {
   const dir = path.join(root, "installed");
   const configDir = path.join(root, "installed-config");
@@ -461,6 +496,19 @@ async function installedPlugin(root) {
     return;
   }
 
+  const listed = await run("claude", ["plugin", "list"], { cwd: dir, env });
+  const healthy =
+    listed.code === 0 &&
+    listed.out.includes("neatcontext@nc-e2e") &&
+    /Status:\s+.*enabled/i.test(listed.out) &&
+    !/failed to load|duplicate hooks/i.test(listed.out);
+  record(
+    "the installed plugin loads cleanly, including commands and MCP",
+    healthy,
+    healthy ? "status=enabled" : (listed.out || listed.err).trim().slice(-240)
+  );
+  if (!healthy) return;
+
   // A fresh config dir has no login. The token is copied in for the single
   // headless call below and shredded in the finally, whatever happens.
   const credentials = path.join(os.homedir(), ".claude", ".credentials.json");
@@ -501,6 +549,86 @@ async function installedPlugin(root) {
         ? `turns=${counted.save.turns} transcriptOffset=${counted.save.transcriptOffset}`
         : `no session state; model said ${JSON.stringify(out.trim().slice(-60))} ${err.trim().slice(-120)}`
     );
+
+    // A real user path: produce durable work, then invoke the installed slash
+    // command in the same session. The secret-shaped diagnostic belongs in the
+    // source conversation only; neither evidence nor the saved context may
+    // retain it.
+    const saveSession = randomUUID();
+    const contextName = "e2e-evidence-context";
+    const secret = "sk-e2e-abcdefghijklmnopqrstuv";
+    const seeded = await run(
+      "claude",
+      [
+        "--model",
+        "haiku",
+        "--session-id",
+        saveSession,
+        "-p",
+        `Durable decision: PAY-842 uses a maximum retry delay of 37 seconds because the provider rate-limits bursts. A diagnostic accidentally displayed API_KEY=${secret}; never write or preserve that value. Use the Write tool to create decision.md containing only the safe durable decision, then reply SEEDED.`,
+        "--allowedTools",
+        "Write"
+      ],
+      { cwd: dir, env, timeoutMs: 300_000 }
+    );
+    const saved = await run(
+      "claude",
+      [
+        "--model",
+        "haiku",
+        // Print mode cannot answer an interactive tool approval prompt. This
+        // process is confined to the disposable E2E config, home, and workspace.
+        "--dangerously-skip-permissions",
+        "-p",
+        "--resume",
+        saveSession,
+        `/neatcontext:save ${contextName}`,
+        "--allowedTools",
+        "Read,Glob,Grep,Write,Bash"
+      ],
+      { cwd: dir, env, timeoutMs: 300_000 }
+    );
+
+    const saveRouting = JSON.parse(
+      await readFile(path.join(home, "plugin-routing.json"), "utf8").catch(() => "{}")
+    );
+    const transcript = saveRouting.sessions?.[saveSession]?.save?.transcriptPath;
+    const trace = typeof transcript === "string" ? await readJsonl(transcript).catch(() => []) : [];
+    const evidenceInvoked = trace.some(
+      (entry) =>
+        entry.type === "assistant" &&
+        entry.message?.content?.some?.(
+          (part) =>
+            part?.type === "tool_use" &&
+            // Claude names the host shell tool Bash on POSIX and PowerShell on
+            // Windows. The command itself is the portable contract here.
+            /neatcontext-cli\.mjs["']?\s+evidence(?:\s|$)/i.test(String(part.input?.command ?? ""))
+        )
+    );
+    record(
+      "a real /neatcontext:save invokes the installed evidence projection",
+      seeded.code === 0 && saved.code === 0 && evidenceInvoked,
+      evidenceInvoked
+        ? `session=${saveSession.slice(0, 8)}`
+        : `seed=${seeded.code} save=${saved.code}; ${saved.out.trim().slice(-180)} ${saved.err.trim().slice(-120)}`
+    );
+
+    const bundle = await findLiteContext(home, contextName);
+    const bundleText = bundle ? await readTextTree(bundle) : "";
+    record(
+      "the live save creates reusable knowledge with the durable decision",
+      Boolean(bundle) && /PAY-842/.test(bundleText) && /37[- ]second|37 seconds/i.test(bundleText),
+      bundle ? path.basename(bundle) : `no bundle; ${saved.out.trim().slice(-180)}`
+    );
+
+    const scratch = (await readdir(dir).catch(() => [])).filter((entry) =>
+      entry.startsWith(".neatcontext-capture-")
+    );
+    record(
+      "the live save omits the secret and consumes its capture scratch file",
+      Boolean(bundle) && !bundleText.includes(secret) && scratch.length === 0,
+      `secretPresent=${bundleText.includes(secret)} scratch=${JSON.stringify(scratch)}`
+    );
   } finally {
     await rm(scoped, { force: true });
   }
@@ -517,15 +645,17 @@ try {
   // a claude process flushes its own snapshot of ~/.claude.json when it ends,
   // and a snapshot loaded before a later phase's trust entry existed would
   // erase it. Loading them all up front makes every snapshot carry them.
-  for (const name of ["probe", "feature", "precompact", "execform"]) {
-    const dir = path.join(root, name);
-    await mkdir(dir, { recursive: true });
-    await trustProject(dir);
+  if (!installedOnly) {
+    for (const name of ["probe", "feature", "precompact", "execform"]) {
+      const dir = path.join(root, name);
+      await mkdir(dir, { recursive: true });
+      await trustProject(dir);
+    }
+    await probeStopContract(root);
+    await liveFeature(root);
+    await probePreCompact(root);
+    await probeExecForm(root);
   }
-  await probeStopContract(root);
-  await liveFeature(root);
-  await probePreCompact(root);
-  await probeExecForm(root);
   await installedPlugin(root);
 } finally {
   await untrustProjects();

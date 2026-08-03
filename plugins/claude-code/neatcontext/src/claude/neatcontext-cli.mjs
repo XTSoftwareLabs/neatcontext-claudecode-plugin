@@ -7,6 +7,7 @@
 //   disconnect                 disconnect the context from this session
 //   create --name --knowledge  create a lite context (--profile-from <file>)
 //   save-target [name]          decide whether save creates or updates
+//   evidence [projection]       inspect ephemeral, privacy-filtered save evidence
 //   save --from <capture.json>  create or update from this conversation
 //   import --from <bundle>      import a portable conversation context
 //   export --to <folder>        copy a saved context's bundle out for sharing
@@ -47,13 +48,20 @@ import {
   sessionId,
   setMode
 } from "../core/routing.mjs";
-import { noteSaved } from "../core/save-nudge.mjs";
+import { normalizeSaveState, noteSaved } from "../core/save-nudge.mjs";
+import {
+  renderEvidenceBlocks,
+  renderEvidenceCoverage,
+  renderEvidenceOverview,
+  renderEvidenceSearch
+} from "../core/conversation-evidence.mjs";
 import {
   applySelection,
   disconnectSelection,
   listAllContexts,
   resolveContext
 } from "../core/selection.mjs";
+import { readClaudeTranscriptEvidence } from "./conversation-evidence.mjs";
 
 const UPGRADE_NOTE =
   "A lite context holds one domain profile, one primary knowledge folder, and saved " +
@@ -63,6 +71,74 @@ const UPGRADE_NOTE =
 
 function print(line = "") {
   process.stdout.write(`${line}\n`);
+}
+
+// Transcript access is intentionally concentrated here. Hooks retain only the
+// opaque path Claude supplied; the explicit save command asks this subcommand
+// for bounded projections and no compiled view is written to disk.
+async function commandEvidence(flags) {
+  const id = sessionId();
+  if (!id) {
+    print("Conversation evidence is unavailable because this Claude session has no id.");
+    return;
+  }
+
+  const routing = await readRouting();
+  const save = normalizeSaveState(routing.sessions[id]?.save);
+  if (!save.transcriptPath) {
+    print(
+      "Conversation evidence is unavailable because Claude has not supplied a transcript " +
+        "location for this session yet. Continue the conversation once and retry; the save " +
+        "can still use the visible conversation."
+    );
+    return;
+  }
+
+  let evidence;
+  try {
+    evidence = await readClaudeTranscriptEvidence(save.transcriptPath, {
+      projectRoot: process.env.CLAUDE_PROJECT_DIR || process.cwd()
+    });
+  } catch {
+    print(
+      "Conversation evidence is unavailable: the Claude transcript recorded for this " +
+        "session is unavailable or unreadable."
+    );
+    return;
+  }
+
+  if (typeof flags["coverage-from"] === "string") {
+    let draft;
+    try {
+      draft = JSON.parse(await readFile(flags["coverage-from"], "utf8"));
+    } catch {
+      print("Could not read a valid capture JSON file for the evidence coverage review.");
+      return;
+    }
+    print(renderEvidenceCoverage(evidence, draft));
+    return;
+  }
+  if (flags["coverage-from"] === true) {
+    print("Pass the capture draft with --coverage-from <capture.json>.");
+    return;
+  }
+  if (typeof flags.show === "string") {
+    print(renderEvidenceBlocks(evidence, flags.show));
+    return;
+  }
+  if (flags.show === true) {
+    print('Pass block ids with --show "B0001,B0002".');
+    return;
+  }
+  if (typeof flags.search === "string") {
+    print(renderEvidenceSearch(evidence, flags.search));
+    return;
+  }
+  if (flags.search === true) {
+    print('Pass literal terms with --search "terms".');
+    return;
+  }
+  print(renderEvidenceOverview(evidence));
 }
 
 // `--name value`, `--name=value`, and bare `--flag` booleans.
@@ -631,10 +707,10 @@ async function commandCreate(flags) {
   }
 }
 
-// The model in the active Claude Code session writes the capture spec: it is
-// the only process that can see the conversation, and reusing it avoids a
-// second model call or a transcript reader. This command validates that output,
-// turns it into files, and creates or updates the selected lite context.
+// The model in the active Claude Code session writes the capture spec from the
+// visible conversation and the evidence projections. Reusing that model avoids
+// a second model call. This command validates its output, turns it into files,
+// and creates or updates the selected lite context.
 function printChangedFiles(label, files) {
   if (files.length === 0) {
     return;
@@ -695,9 +771,7 @@ async function commandSave(flags) {
         useWhen: result.routingDescription,
         source: result.profileText
       }).catch(() => undefined);
-      if (flags.consume === true || flags.consume === "true") {
-        await rm(source, { force: true });
-      }
+      await rm(source, { force: true });
       // The save nudge's "nothing new since the last save" suppressor starts
       // counting from here.
       await noteSaved(sessionId()).catch(() => undefined);
@@ -720,9 +794,7 @@ async function commandSave(flags) {
       useWhen: result.routingDescription,
       source: result.profileText
     }).catch(() => undefined);
-    if (flags.consume === true || flags.consume === "true") {
-      await rm(source, { force: true });
-    }
+    await rm(source, { force: true });
     await noteSaved(sessionId()).catch(() => undefined);
     print(`Lite context folder: ${result.record.directory}`);
     print(`Profile path: ${result.record.profilePath}`);
@@ -905,6 +977,10 @@ async function run() {
     await commandSave(flags);
     return;
   }
+  if (command === "evidence") {
+    await commandEvidence(flags);
+    return;
+  }
   if (command === "import") {
     await commandImport(flags);
     return;
@@ -956,7 +1032,7 @@ async function run() {
   }
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | disconnect | create | save | import | export | delete | mode | alias | describe."
+      "Use: status | list | use | disconnect | create | save-target | evidence | save | import | export | delete | mode | alias | describe."
   );
 }
 

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective date: July 30, 2026**
+**Effective date: August 3, 2026**
 
 This policy describes how the NeatContext host plugins for Claude Code, Kimi
 Code, and Codex ("the plugins"), published by XT SOFTWARE LABS LLC, handle
@@ -33,13 +33,24 @@ The plugins handle information only when needed to provide their features:
 - **Conversation captures:** selected information from the active coding
   conversation when you invoke the host's NeatContext save command, whether
   creating a context or updating one. The workflow instructs the active model
-  to create a focused capture rather than storing the entire transcript.
+  to create a focused capture rather than storing the entire transcript. In
+  Claude Code, the explicit save command can use a bundled reader to create
+  temporary, bounded evidence projections from the current host transcript.
+  Before returning a projection to the active model, the reader discards system
+  records, thinking blocks, raw shell commands, edit and file bodies, internal
+  task-list operations, and routine successful read/search results; it also
+  applies best-effort redaction to common secret patterns. The plugin does not
+  create a compiled transcript file, index, or cache. Claude Code may retain
+  the projection as ordinary tool output in its own session transcript under
+  Claude Code's settings.
 - **Linked files:** paths and readable content from knowledge folders you
   explicitly connect to a lite context.
 - **Operational state:** context identifiers and names, the selected context
   for a coding-host session, routing mode, routing descriptions, aliases,
   recent routing decisions or refusals, timestamps, and host session
-  identifiers.
+  identifiers. For Claude Code, this also includes the current transcript path
+  supplied by the host, retained as opaque session metadata so an explicit save
+  can open that exact transcript without searching user directories.
 - **Desktop companion connection details:** the local port and bearer token
   written by the NeatContext desktop app. The active plugin reads these details
   to authenticate requests to the loopback companion service.
@@ -50,11 +61,14 @@ The plugins handle information only when needed to provide their features:
   commands (for example `git commit`), 16-character hashes of edited file
   paths, message token counts, the transcript's size in bytes, and whether a
   fixed proposal marker line appeared. Message text, command arguments, file
-  contents, and file paths are never stored or transmitted; everything outside
-  the whitelist is discarded as soon as the line is read. The counters are
-  kept in the local routing state file and the nudge only ever asks — a save
-  still happens exclusively through the save command's preview-and-confirm
-  flow. Setting the routing mode to `manual` disables the nudge.
+  contents, and edited file paths are not stored by the nudge; everything
+  outside the whitelist is discarded as soon as the line is read. The
+  host-supplied transcript path is stored separately as described above. The
+  counters are kept in the local routing state file and the nudge only ever
+  asks — transcript evidence is read only after the user invokes save, and a
+  save still happens exclusively through the save command's validation and,
+  for updates, preview-and-confirm flow. Setting the routing mode to `manual`
+  disables the nudge but does not disable an explicit save.
 
 The plugins do not intentionally collect account credentials, payment
 information, advertising identifiers, or precise location information.
@@ -69,7 +83,9 @@ By default, the plugins store or read data in these locations:
 - `~/.neatcontext/plugin-selection.json` and
   `~/.neatcontext/plugin-sessions/` for context selections.
 - `~/.neatcontext/plugin-routing.json` for routing metadata and a bounded
-  history of recent routing decisions.
+  history of recent routing decisions. In Claude Code this file also holds the
+  host-provided transcript path for up to the bounded set of recent plugin
+  sessions; it does not hold transcript message content.
 - `~/.neatcontext/companion.json` for discovery information written by the
   NeatContext desktop app.
 - `.neatcontext-capture-*.json` in the active project as a temporary save
@@ -78,9 +94,9 @@ By default, the plugins store or read data in these locations:
 The `NEATCONTEXT_COMPANION_FILE` environment variable can move the companion
 discovery file and related plugin state to another location.
 
-Temporary conversation-capture files are removed after a successful consumed
-save. A file may remain after validation or another failure so the capture can
-be repaired; you can delete it manually at any time.
+Temporary conversation-capture files are removed after a successful create or
+confirmed update. A file may remain after a preview, validation error, or other
+failure so the capture can be repaired; you can delete it manually at any time.
 
 ## Network communication and disclosure
 
@@ -92,7 +108,8 @@ The following communications can occur:
 1. **Your coding host and model provider.** Plugin commands run inside Claude
    Code, Kimi Code, or Codex. Context content returned by a plugin, and content
    the active model prepares for a saved context, can be processed by the model
-   provider configured for that host.
+   provider configured for that host. In Claude Code, this includes ephemeral,
+   privacy-filtered evidence projections requested during an explicit save.
 2. **NeatContext desktop.** For standard contexts, the active plugin
    communicates with the NeatContext desktop companion over HTTP on
    `127.0.0.1`. This can include context identifiers, context documents,
@@ -121,6 +138,10 @@ Local data remains until you remove it or a plugin operation removes it:
 - Standard contexts are managed and deleted in the NeatContext desktop app.
 - Selection, routing, and temporary files can be deleted manually from the
   locations listed above.
+- Claude transcript pointers age out with the bounded recent-session routing
+  state or can be removed by deleting `plugin-routing.json`. Deleting that
+  pointer does not delete the host's transcript; host transcript retention is
+  controlled by the coding host.
 
 Uninstalling a plugin does not automatically remove data under
 `~/.neatcontext`, because that data is stored outside the coding host's plugin
@@ -134,7 +155,9 @@ not modified or uploaded by the import operation.
 The plugins limit their desktop connection to the loopback interface and use the
 desktop app's bearer token. Local state files containing operational metadata
 are written with restrictive permissions where the operating system supports
-them. No method of storage or processing is completely secure, so avoid saving
+them. Conversation-evidence redaction recognizes common secret shapes but
+cannot identify every sensitive value or every form of personal information.
+No method of storage or processing is completely secure, so avoid saving
 secrets or sensitive information that you do not want processed by your coding
 host or retained in a context.
 

@@ -84,6 +84,11 @@ test("marketplace metadata is complete, canonical, and version-aligned", async (
   });
   assert.equal(plugin.license, "MIT");
   assert.equal(entry.license, "MIT");
+  assert.equal(
+    plugin.hooks,
+    undefined,
+    "hooks/hooks.json is auto-discovered; declaring the default path loads it twice"
+  );
   assert.equal(plugin.version, packageJson.version);
   assert.match(
     bridgeText,
