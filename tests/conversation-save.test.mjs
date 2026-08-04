@@ -29,6 +29,9 @@ let serial = 0;
 const childEnv = () => ({
   ...process.env,
   CLAUDE_CODE_SESSION_ID: "",
+  // No session and no host: nothing here is about which window is asking.
+  NEATCONTEXT_HOST_KEY: "",
+  CLAUDE_PID: "",
   NEATCONTEXT_HOME: home
 });
 

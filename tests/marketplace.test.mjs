@@ -154,8 +154,8 @@ test("plugin hooks spawn without a shell", async () => {
   const entries = Object.entries(hooks.hooks);
   assert.deepEqual(
     entries.map(([event]) => event).sort(),
-    ["PreCompact", "Stop"],
-    "hooks.json must register exactly the Stop and PreCompact events"
+    ["PreCompact", "SessionStart", "Stop"],
+    "hooks.json must register exactly the SessionStart, Stop and PreCompact events"
   );
 
   for (const [event, matchers] of entries) {

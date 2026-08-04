@@ -16,6 +16,7 @@
 // user sees, and there is no longer anything worth showing them.
 
 import { configureSessionId } from "../src/core/session.mjs";
+import { writeHostPointer } from "../src/core/host-session.mjs";
 import { updateRouting } from "../src/core/routing.mjs";
 import { normalizeSaveState, rememberTranscriptPath } from "../src/core/session-state.mjs";
 
@@ -31,6 +32,11 @@ async function main() {
       : null;
   if (!id) return;
   configureSessionId(() => id);
+
+  // Re-assert which session this host process is on, every turn. SessionStart is
+  // what makes the MCP bridge notice a `/clear`; this is what heals the record if
+  // that hook did not run, or if something else wrote it wrongly in between.
+  await writeHostPointer(id, { source: "stop" }).catch(() => undefined);
 
   const save = normalizeSaveState({});
   if (!rememberTranscriptPath(save, input.transcript_path)) return;
