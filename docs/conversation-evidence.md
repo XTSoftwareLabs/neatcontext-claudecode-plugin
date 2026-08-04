@@ -12,9 +12,7 @@ sanitized blocks it needs. Secrets and raw payloads are filtered out, nothing
 is written to disk, and the saved context contains the model's own summary —
 never a transcript dump.
 
-Implemented for Claude Code today. The host-neutral projector lives in
-`shared/core/conversation-evidence.mjs` and is packaged into the other host
-plugins, but their transcript adapters are not connected yet.
+This is only for Claude Code now.
 
 ## Attribution
 
@@ -24,8 +22,5 @@ The design was informed by the compiler-and-view concepts described in:
 - [lllyasviel/VCC](https://github.com/lllyasviel/VCC)
 - [sting8k/pi-vcc](https://github.com/sting8k/pi-vcc)
 
-This is a clean-room implementation written for NeatContext. No source code
-from either repository is copied or adapted; the borrowed idea is the general
-separation of parsing a host trace into a stable intermediate representation
-and lowering it into task-specific views. NeatContext is MIT licensed
-(see [LICENSE](../LICENSE)).
+The borrowed idea is the general separation of parsing a host trace into a stable intermediate representation
+and lowering it into task-specific views. NeatContext is MIT licensed (see [LICENSE](../LICENSE)).
