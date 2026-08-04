@@ -1,6 +1,6 @@
 ---
 name: export
-description: Export a NeatContext lite context saved from a conversation into a self-contained bundle folder that can be shared or moved to another machine. Use only when the user explicitly invokes this skill or asks to export a NeatContext context.
+description: Export a NeatContext context saved from a conversation into a self-contained bundle folder that can be shared or moved to another machine. Use only when the user explicitly invokes this skill or asks to export a NeatContext context.
 ---
 
 # Export context
@@ -15,7 +15,7 @@ When no context was named, the connected one is exported. To pick a different
 one, list them first:
 
 ```text
-node "<plugin-root>/src/codex/neatcontext-cli.mjs" list --lite
+node "<plugin-root>/src/codex/neatcontext-cli.mjs" list
 ```
 
 Then run:

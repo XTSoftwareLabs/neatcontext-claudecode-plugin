@@ -19,14 +19,14 @@ describe("which files the gate polices", () => {
       true
     );
     assert.equal(
-      isGatedFile("plugins/claude-code/neatcontext/src/core/lite-context.mjs"),
+      isGatedFile("plugins/claude-code/neatcontext/src/core/context-store.mjs"),
       true
     );
   });
 
   it("leaves out tests, docs, and the gate's own tooling", () => {
     // A test file runs by definition; counting it would only dilute the gate.
-    assert.equal(isGatedFile("tests/lite-context.test.mjs"), false);
+    assert.equal(isGatedFile("tests/context.test.mjs"), false);
     assert.equal(isGatedFile("tools/diff-coverage.mjs"), false);
     assert.equal(isGatedFile("README.md"), false);
     assert.equal(isGatedFile("plugins/claude-code/neatcontext/commands/use.md"), false);

@@ -1,6 +1,6 @@
 ---
 name: neatcontext-create
-description: Create a fresh NeatContext lite context from a user-defined behavioral profile and an existing local knowledge folder. Use only when the user explicitly asks to create a new context, or runs /neatcontext-create — not to save the current conversation.
+description: Create a fresh NeatContext context from a user-defined behavioral profile and an existing local knowledge folder. Use only when the user explicitly asks to create a new context, or runs /neatcontext-create — not to save the current conversation.
 ---
 
 # Create context

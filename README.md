@@ -96,9 +96,9 @@ This is the useful work you may want to save. Run `/neatcontext:save event-parti
 
 ```text
 Claude:
-Lite context folder: C:\Users\alex\.claude\neatcontext\event-partition-investigation
-Profile path: C:\Users\alex\.claude\neatcontext\event-partition-investigation/profile.md
-Knowledge folder: C:\Users\alex\.claude\neatcontext\event-partition-investigation/knowledge
+Context folder: C:\Users\alex\.neatcontext\contexts\event-partition-investigation
+Profile path: C:\Users\alex\.neatcontext\contexts\event-partition-investigation\profile.md
+Knowledge folder: C:\Users\alex\.neatcontext\contexts\event-partition-investigation\knowledge
 Use command: /neatcontext:use event-partition-investigation
 ```
 
@@ -132,17 +132,17 @@ Claude: I will start with the checks from the saved context: per-partition lag,
 Save the useful work in the current conversation using familiar Save / Save As
 behavior:
 
-- With no name, update the connected lite context after confirmation. If no
-  lite context is connected, create a new one with a name Claude derives.
-- With the exact name of an existing lite context, update it after
+- With no name, update the connected context after confirmation. If no
+  context is connected, create a new one with a name Claude derives.
+- With the exact name of an existing context, update it after
   confirmation. It does not need to be connected, and saving does not switch
   the current connection.
-- With a new name, create a new lite context.
+- With a new name, create a new context.
 
 Updates merge durable new work with the context's existing profile and
 conversation knowledge. For a context created with `/neatcontext:create`, its
 linked knowledge folder remains untouched; conversation-derived additions are
-stored inside the lite-context bundle.
+stored inside the context bundle.
 
 In Claude Code, saving compiles the host's current session transcript into an
 ephemeral, privacy-filtered evidence view so earlier work can still be recovered
@@ -173,34 +173,34 @@ List all contexts you can connect.
 ### `/neatcontext:status`
 
 Show the context connected to the current session and the current routing mode.
-It also reports problems such as missing lite-context files or knowledge
+It also reports problems such as missing context files or knowledge
 folders.
 
 ### `/neatcontext:create`
 
-Create a fresh lite context instead of saving the current conversation. Claude
+Create a fresh context instead of saving the current conversation. Claude
 asks what the context is for, which existing folder contains its knowledge, and
 what to call it.
 
 The knowledge folder stays where it is; the command does not copy, move, or
 overwrite it. Later `/neatcontext:save` updates keep generated conversation
-knowledge inside the lite-context bundle.
+knowledge inside the context bundle.
 
 ### `/neatcontext:import [folder]`
 
-Import a lite context bundle shared by someone else. Import creates your own
+Import a context bundle shared by someone else. Import creates your own
 local copy and leaves the shared folder unchanged.
 
 After importing, connect it with `/neatcontext:use <name>`.
 
 ### `/neatcontext:export [name] [folder]`
 
-Copy a lite context saved from a conversation into a self-contained bundle
+Copy a context saved from a conversation into a self-contained bundle
 folder, so it can be moved to another machine or handed to a teammate and
 brought in with `/neatcontext:import`. A subfolder named after the context is
 created inside the folder you give, and the context itself is unchanged.
 
-Lite contexts are shared between AI coding clients by living in one folder on
+Contexts are shared between AI coding clients by living in one folder on
 one machine, so export is what carries one beyond it.
 
 A context created with `/neatcontext:create` cannot be exported: it links a
@@ -209,12 +209,11 @@ hand over. Copy that folder across yourself and re-create the context there.
 
 ### `/neatcontext:delete [name or number]`
 
-Delete a lite context after confirmation. Standard contexts must be deleted in
-the NeatContext desktop app.
+Delete a context after confirmation.
 
 For a context created with `/neatcontext:create`, your original knowledge folder
-is left untouched. Generated conversation knowledge stored inside any lite
-context is deleted with that context.
+is left untouched. Generated conversation knowledge stored inside the context
+is deleted with it.
 
 ### `/neatcontext:mode [auto|ask|manual]`
 
@@ -231,11 +230,9 @@ Run `/neatcontext:mode` without an argument to show the current mode. Add
 /neatcontext:mode auto --global
 ```
 
-## Context types
+## Context contents
 
-### Lite context
-
-A lite context contains:
+A context contains:
 
 - **One domain profile** — your team's rules, terminology, constraints, and
   preferred ways of working. It guides how Claude behaves and answers.
@@ -243,7 +240,6 @@ A lite context contains:
   troubleshooting notes, session summaries, and other knowledge Claude can
   use. When the primary folder is linked from `/neatcontext:create`, saved
   conversation additions stay in the local context bundle.
-- **No extensions.**
 
 Use `/neatcontext:save` to generate one from the current conversation,
 `/neatcontext:create` to use an existing knowledge folder, or
@@ -253,34 +249,19 @@ Use `/neatcontext:save` to generate one from the current conversation,
 
 | | Best for | What you get |
 |---|---|---|
-| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A lite context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> Both are generated automatically. Together, they provide reusable context—not just a conversation transcript. See [Context types](#context-types) for details. |
+| **NeatContext** | Reusing knowledge in fresh sessions or across a team | A context generated for you:<ul><li><strong>1 domain profile:</strong> your team's rules that guide LLM behavior.</li><li><strong>1 knowledge folder:</strong> TSGs, runbooks, and other team knowledge.</li></ul> Both are generated automatically. Together, they provide reusable context—not just a conversation transcript. See [Context contents](#context-contents) for details. |
 | **Claude Code resume** | Continuing the same conversation | The original session and its conversation history |
 | **Save or export a conversation** | Keeping a record | The raw transcript, including the back-and-forth that led to the result |
 
 **NeatContext keeps what will help Claude work accurately next time, without carrying over the entire chat.**
 
-### Standard context
-
-A standard context contains:
-
-- **One domain profile** — the team's rules that guide Claude's behavior.
-- **Multiple knowledge folders** — indexed collections of team documentation
-  that Claude can search for relevant information.
-- **Extensions** — connections to internal and external systems that let Claude
-  use the tools available to the context.
-
-Standard contexts are intended for enterprise-level use. Create and manage them
-in [NeatContext Desktop](https://www.neatcontext.com). You'll need the desktop
-app installed and open while using a standard context.
-
 ## Security and data handling
 
 - See the [Privacy Policy](PRIVACY.md) for the complete description of local
   storage, network communication, retention, and deletion.
-- The host plugins run only the Node.js files bundled in this repository. Their
-  desktop integration connects to the NeatContext companion service on
-  `127.0.0.1`; the plugins themselves make no outbound internet requests.
-- Lite contexts are stored locally under `~/.neatcontext/lite`. Saving or
+- The host plugins run only the Node.js files bundled in this repository and
+  make no outbound internet requests.
+- Contexts are stored locally under `~/.neatcontext/contexts`. Saving or
   updating from a conversation first creates a gitignored
   `.neatcontext-capture-*.json` scratch file in the current project and removes
   it after a successful save.
@@ -292,12 +273,11 @@ app installed and open while using a standard context.
   session transcript.
 - A connected context's profile and selected knowledge files are read into the
   active coding session when its model uses them. They are then handled like
-  other content supplied to that coding host. Standard-context extension tools
-  may contact services configured separately in NeatContext.
+  other content supplied to that coding host.
 - Import only bundles you trust. Their profile and Markdown knowledge become
   instructions and source material available to the active model.
-- Creating or updating a lite context never overwrites an external knowledge
-  folder referenced by `/neatcontext:create`. Deleting a lite context always
+- Creating or updating a context never overwrites an external knowledge
+  folder referenced by `/neatcontext:create`. Deleting a context always
   requires confirmation and removes its bundle-local generated knowledge.
 
 ## License

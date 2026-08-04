@@ -37,9 +37,8 @@ After binding:
   question.
 
 Contexts are connected inside this Kimi Code session with `use_context` or the
-explicit `/neatcontext:use` command. Never tell the user to select or connect a
-context in the NeatContext desktop app. Standard contexts need the desktop app
-running, but selection still happens here.
+explicit `/neatcontext:use` command. The plugin uses local Contexts; there is no
+NeatContext Desktop connection right now.
 
 The plugin commands are `/neatcontext:save`, `/neatcontext:use`,
 `/neatcontext:disconnect`, `/neatcontext:list`, `/neatcontext:status`,

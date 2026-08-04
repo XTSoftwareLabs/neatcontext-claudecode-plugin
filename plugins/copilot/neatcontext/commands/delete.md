@@ -1,21 +1,21 @@
 ---
-description: Delete a lite NeatContext context
-argument-hint: [lite context name or number]
+description: Delete a NeatContext Context
+argument-hint: [context name or number]
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---
 
-Delete a lite context.
+Delete a context.
 
-Your lite contexts:
+Your contexts:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" list --lite`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs" list`
 
 The user asked to delete: $ARGUMENTS
 
 Based on the list above:
 
-- If no name was given, or it does not clearly match exactly one lite context,
+- If no name was given, or it does not clearly match exactly one context,
   show the list and ask which one they mean. Do not guess.
 - If it matches one, run the following preview first:
 

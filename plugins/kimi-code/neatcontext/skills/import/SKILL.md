@@ -1,6 +1,6 @@
 ---
 name: neatcontext-import
-description: Import a self-contained NeatContext lite-context bundle shared by another person, leaving the source bundle unchanged. Use only when the user explicitly invokes this skill or asks to import a NeatContext bundle.
+description: Import a self-contained NeatContext context bundle shared by another person, leaving the source bundle unchanged. Use only when the user explicitly invokes this skill or asks to import a NeatContext bundle.
 ---
 
 # Import context

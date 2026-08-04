@@ -40,7 +40,6 @@ const cliFile = path.join(
 );
 
 let temp;
-let companionFile;
 let routingFile;
 let transcriptFile;
 
@@ -132,7 +131,7 @@ function runCli(args, { sessionId = "evidence-session" } = {}) {
         ...process.env,
         CLAUDE_CODE_SESSION_ID: sessionId,
         CLAUDE_PROJECT_DIR: "/project",
-        NEATCONTEXT_COMPANION_FILE: companionFile
+        NEATCONTEXT_HOME: temp
       }
     });
     let output = "";
@@ -158,7 +157,6 @@ async function pointSessionAtTranscript(value = transcriptFile) {
 
 before(async () => {
   temp = await mkdtemp(path.join(os.tmpdir(), "neatcontext-evidence-test-"));
-  companionFile = path.join(temp, "companion.json");
   routingFile = path.join(temp, "plugin-routing.json");
   transcriptFile = path.join(temp, "conversation.jsonl");
   await writeFile(

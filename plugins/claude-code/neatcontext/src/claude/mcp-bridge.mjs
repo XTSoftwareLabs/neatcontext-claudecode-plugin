@@ -1,49 +1,24 @@
-// NeatContext plugin MCP server: a generic MCP-stdio <-> HTTP bridge.
+// NeatContext plugin MCP server for Claude Code.
 //
-// Claude Code launches this as an MCP server. It relays the host's MCP JSON-RPC
-// to the NeatContext desktop app's local companion endpoint (POST /v1/mcp),
-// which hosts the real NeatContext MCP surface (get_context and the connected
-// context's extension tools). This file contains NO
-// NeatContext code and never touches its binary — it only speaks MCP and the
-// documented companion HTTP contract.
-//
-// Behaviors layered on top of a plain relay:
-//   * initialize advertises tools.listChanged, and we poll the connected-context
-//     version so the host refreshes its tool list when you run /neatcontext:use.
-//   * NeatContext keeps its connected context in memory only, so restarting the
-//     app drops it. Before anything that depends on the context, and on every
-//     poll, we put the remembered selection back — otherwise a session that ran
-//     /neatcontext:use keeps the old tool list but gets "no context is
-//     connected" from get_context.
-//   * while nothing is connected, the tool list is trimmed to get_context: the
-//     app's runtime file outlives its connection, so it can still advertise the
-//     previous context's extension tools.
-//   * if the backend child was respawned (or NeatContext just started), a
-//     "not initialized" error triggers a transparent re-handshake + retry.
-//   * if NeatContext is not reachable, we answer locally so the MCP server still
-//     loads; get_context then tells the user to connect with /neatcontext:use.
-//
-// Source seam: a session is served by one of two sources, chosen per message
-// from the recorded selection. A *standard* context is NeatContext's and is
-// forwarded to the app (below). A *lite* context is the plugin's own and is
-// answered locally — no HTTP, no app, so it keeps working with NeatContext
-// closed or never installed.
+// Behaviors kept from the Claude Code bridge:
+//   * initialize advertises tools.listChanged, and we poll the selected
+//     context so the host refreshes its tool list when the user runs
+//     /neatcontext:use (or the session routes itself).
+//   * the routing tools (use_context, preview_context) let the session switch
+//     between contexts, under the same auto/ask/manual policy.
+//   * a selection whose context was deleted out-of-band is reported by
+//     get_context instead of silently vanishing.
 
 import readline from "node:readline";
 import "./session.mjs";
+import { readSelection } from "../core/local-state.mjs";
 import {
-  clientFor,
-  ensureConnection,
-  readDiscovery,
-  readSelection,
-  request
-} from "../core/companion-client.mjs";
-import {
-  LITE_MISSING_MESSAGE,
+  CONTEXT_MISSING_MESSAGE,
   listKnowledgeFiles,
-  readLite,
-  renderLiteContext
-} from "../core/lite-context.mjs";
+  listContexts,
+  readContext,
+  renderContext
+} from "../core/context-store.mjs";
 import {
   addAlias,
   menuEntries,
@@ -55,29 +30,28 @@ import {
   sessionId,
   switchPolicy
 } from "../core/routing.mjs";
-import { applySelection, listAllContexts, resolveContext } from "../core/selection.mjs";
+import { applySelection, resolveContext } from "../core/selection.mjs";
 
 const SERVER_INFO = { name: "neatcontext", version: "0.2.7" };
 const GET_CONTEXT_TOOL = {
   name: "get_context",
   title: "Get Context",
   description:
-    "Get the connected NeatContext Context: domain profile files to read, local " +
-    "knowledge folders to search, and the extension tools available on this connection.",
+    "Get the connected NeatContext Context: domain profile files to read, and local " +
+    "knowledge folders to search.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false }
 };
 // What to say when a session has nothing to ground in. It is deliberately about
-// what to do *here*: the app being closed, mid-restart, or holding no
-// connection are all the same situation from inside Claude Code, and all of
-// them are answered by a command in this session.
+// what to do *here*: every route is a command in this session, and no other
+// software is involved.
 //
 // Two versions, because "pick one of yours" and "you have none yet" are
-// different problems. With nothing on disk `/neatcontext:use` has nothing to
+// different problems. With an empty store `/neatcontext:use` has nothing to
 // list, and `/neatcontext:create` wants a folder of documents a new user may
-// not have — so a session told only about those two sends the user to two doors
-// that are both locked. `/neatcontext:save` is the one that always opens: it
-// builds the first context out of the conversation already happening. So it
-// leads when there is nothing to connect.
+// not have — so a session told only about those two is sent to two doors that
+// are both locked. `/neatcontext:save` is the one that always opens: it builds
+// the first context out of the conversation already happening. So it leads when
+// there is nothing to connect.
 const NOTHING_CONNECTED_HEAD = "No NeatContext Context is connected to this session.";
 
 const NOTHING_CONNECTED =
@@ -85,28 +59,19 @@ const NOTHING_CONNECTED =
   "a new one with `/neatcontext:save`, or create one from a folder of documents with " +
   "`/neatcontext:create`. Until then, do not answer from general knowledge.";
 
-// Deliberately "none to connect right now" rather than "none exist": a closed
-// desktop app hides its standard contexts from this process, and claiming the
-// user has none would be a guess about software the plugin cannot see. What is
-// true either way is that `/neatcontext:use` has nothing to offer this session.
 const NOTHING_EXISTS =
-  `${NOTHING_CONNECTED_HEAD} There are none to connect right now, so \`/neatcontext:use\` has ` +
-  "nothing to list. Save the work in this conversation as a new one with " +
+  `${NOTHING_CONNECTED_HEAD} There are none on this machine yet, so \`/neatcontext:use\` has ` +
+  "nothing to list. Save the work in this conversation as the first one with " +
   "`/neatcontext:save` — it needs no folder and nothing else installed — or point " +
   "`/neatcontext:create` at a folder of docs, runbooks, or TSGs you already have. Until then, " +
   "do not answer from general knowledge.";
 
-// How connecting works in Claude Code, stated by the plugin because NeatContext
-// cannot state it: its own framing is written for its desktop client, where
-// connecting means opening the app, choosing a context and pressing a button.
-// Forwarded verbatim, that framing makes a session send the user off to do
-// exactly that — in a plugin whose whole point is that it never has to happen.
-// So this rides on both channels a session reads, and says which one wins.
+// How connecting works in the plugin.
 const CONNECTION_RULE = `## Connecting a context, in Claude Code
 
 Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. New ones are made from here too: \`/neatcontext:save\` turns the work in this conversation into one, and \`/neatcontext:create\` builds one around a folder of documents the user already has.
 
-Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
+There is no Desktop connection right now. Contexts are stored by this plugin. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
 // The two tools that let a session change what it is grounded in. They are the
 // plugin's whole routing mechanism: there is no model in any process here, so
@@ -169,32 +134,24 @@ const ROUTING_TOOLS = new Map([
 ]);
 
 // Session instructions are fetched once, during the handshake, and MCP has no
-// way to change them afterwards. The recorded selection is on disk before the
-// handshake, though, so the source that will serve this session is already known
-// here: a lite context is framed by the plugin, a standard one by NeatContext.
-//
-// Anything that varies per context belongs in get_context instead, which is
-// re-read on every call and refreshed live by tools/list_changed. These
-// instructions do one job: get get_context called at the right moments.
-const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and local knowledge stored on this machine.
+// way to change them afterwards. Anything that varies per context belongs in
+// get_context instead, which is re-read on every call and refreshed live by
+// tools/list_changed. These instructions do one job: get get_context called at
+// the right moments.
+const CONTEXT_INSTRUCTIONS = `This session can be grounded in a NeatContext Context: one domain profile and local knowledge stored on this machine.
 
 Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
 
-A lite context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
+A context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
 
 Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
 
-// Written to survive being wrong. These instructions are fixed at the handshake
-// and MCP cannot revise them, but what they describe changes freely: NeatContext
-// may not have finished starting when the host spawned this process, and a
-// Context can be connected afterwards — from this session or another window.
-//
-// So this must never state "nothing is connected" as a settled fact. A session
-// told that carries it for its whole life and answers it back to the user
-// without ever calling get_context, which by then would have returned a
-// perfectly good Context. Describing the handshake and deferring the current
-// state to the tool is the only thing that stays true.
-const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context was connected at the moment this session started. That says nothing about now: NeatContext may still have been starting up, and a Context can be connected at any time, from this session or another window.
+// Written to survive being wrong. These instructions are fixed at the
+// handshake, but a context can be connected at any time afterwards — from this
+// session or from another window on the same workspace. So this must never
+// state "nothing is connected" as a settled fact; it defers the current state
+// to get_context, which is the only thing that stays true.
+const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context was connected at the moment this session started. That says nothing about now: a Context can be connected at any time, from this session or another window on this workspace.
 
 These instructions are fixed at the handshake and cannot be updated, so they are not evidence about the current state — and you must not tell the user nothing is connected on the strength of this text.
 
@@ -202,32 +159,6 @@ When the user asks anything that depends on their own domain, documents, tools, 
 
 - If it returns a Context, ground your answer in it and cite what you used.
 - Only if it reports that nothing is connected, say so, and offer the way forward it names — connecting an existing context with /neatcontext:use, saving this conversation as a new one with /neatcontext:save, or building one from a folder of documents with /neatcontext:create. Which of those actually applies depends on what exists right now, so relay what the tool says rather than guessing from this text.`;
-
-// Methods whose answer depends on which context is connected.
-const CONTEXT_METHODS = new Set(["tools/list", "tools/call", "prompts/list", "prompts/get"]);
-
-// Prompts NeatContext serves that this plugin does not surface. A context here
-// is whatever the user made it — plenty of them, lite ones especially, have
-// nothing to do with incidents — so an incident-shaped slash command sitting in
-// the menu misrepresents what the connected context is for.
-const HIDDEN_PROMPTS = new Set(["analyze_incident"]);
-
-function isHiddenPromptGet(message) {
-  return message.method === "prompts/get" && HIDDEN_PROMPTS.has(message.params?.name);
-}
-
-function withoutHiddenPrompts(response) {
-  if (!Array.isArray(response?.result?.prompts)) {
-    return response;
-  }
-  return {
-    ...response,
-    result: {
-      ...response.result,
-      prompts: response.result.prompts.filter((prompt) => !HIDDEN_PROMPTS.has(prompt.name))
-    }
-  };
-}
 
 function writeLine(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -237,63 +168,33 @@ function jsonRpcResult(id, result) {
   return { jsonrpc: "2.0", id, result };
 }
 
-function isNotInitializedError(response) {
-  return response && response.error && response.error.code === -32002;
+// --- Context source: answers locally, from disk ------------------------------
+
+async function listAllContexts() {
+  return { contexts: await listContexts() };
 }
 
-// --- NeatContext source: forwards MCP to the companion endpoint --------------
-
-function neatContextSource() {
-  async function postMcp(message, timeoutMs = 20000) {
-    const discovery = await readDiscovery();
-    if (!discovery) {
-      throw new Error("companion offline");
-    }
-    const response = await request(discovery, "POST", "/v1/mcp", { body: message, timeoutMs });
-    if (response.status === 202) {
-      return null; // notification accepted, no body
-    }
-    if (response.status >= 500) {
-      throw new Error(`companion error ${response.status}`);
-    }
-    return response.json;
-  }
-
-  return {
-    // Current connection state, with the remembered context put back first if
-    // NeatContext has forgotten it. Null when the app is unreachable, so an
-    // offline app never looks like a disconnected context.
-    async ensure() {
-      const discovery = await readDiscovery();
-      if (!discovery) {
-        return null;
-      }
-      try {
-        return await ensureConnection(clientFor(discovery));
-      } catch {
-        return null;
-      }
-    },
-    postMcp
-  };
+// Resolved per call, never fixed at startup: the user can create or save the
+// first context mid-session, and the next get_context has to stop telling them
+// they have none.
+async function nothingConnectedText() {
+  const { contexts } = await listAllContexts().catch(() => ({ contexts: [] }));
+  return contexts.length === 0 ? NOTHING_EXISTS : NOTHING_CONNECTED;
 }
 
-// --- Lite source: answers locally, from disk ---------------------------------
-
-// The selected lite context, or null when this session is on a standard one.
-// A selection whose context was deleted out-of-band resolves to `missing` so
-// get_context can say what happened instead of silently falling back to
-// NeatContext and reporting "no context is connected".
-async function activeLite() {
+// The selected context, or null when nothing is selected. A selection
+// whose context was deleted out-of-band resolves to `missing` so get_context
+// can say what happened.
+async function activeContext() {
   const selection = await readSelection().catch(() => null);
-  if (!selection || selection.kind !== "lite") {
+  if (!selection || selection.available === false) {
     return null;
   }
-  const record = await readLite(selection.contextId).catch(() => null);
+  const record = await readContext(selection.contextId).catch(() => null);
   return record ? { record } : { missing: true, name: selection.contextName };
 }
 
-async function liteResponse(message, lite) {
+async function contextResponse(message, context) {
   const { id, method, params } = message;
   if (id === undefined || id === null) {
     return null; // notification: nothing to answer
@@ -304,18 +205,23 @@ async function liteResponse(message, lite) {
         typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
       capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
       serverInfo: SERVER_INFO,
-      // NeatContext's own framing is never borrowed for a lite context, whether
-      // or not the app happens to be running.
-      instructions: LITE_INSTRUCTIONS
+      instructions: context ? CONTEXT_INSTRUCTIONS : NO_CONTEXT_INSTRUCTIONS
     });
   }
   if (method === "ping") return jsonRpcResult(id, {});
-  // A lite context is one profile and one folder: get_context is the whole
-  // surface, and there are no extensions or prompts by design.
+  // A context is one profile and one folder: get_context is the whole surface.
   if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
   if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
   if (method === "tools/call" && params?.name === GET_CONTEXT_TOOL.name) {
-    const text = lite.missing ? LITE_MISSING_MESSAGE : await renderLiteContext(lite.record);
+    if (!context) {
+      return jsonRpcResult(id, {
+        content: [{ type: "text", text: await nothingConnectedText() }],
+        isError: false
+      });
+    }
+    const text = context.missing
+      ? CONTEXT_MISSING_MESSAGE
+      : await renderContext(context.record);
     return jsonRpcResult(id, { content: [{ type: "text", text }], isError: false });
   }
   if (method === "tools/call" || method === "prompts/get") {
@@ -324,54 +230,11 @@ async function liteResponse(message, lite) {
       id,
       error: {
         code: -32601,
-        message:
-          `"${params?.name}" is not available on a lite context. Lite contexts serve only ` +
-          "get_context; extension tools come from a standard context, which this session can " +
-          "connect with /neatcontext:use."
+        message: `"${params?.name}" is not available. Contexts serve only get_context.`
       }
     };
   }
   return jsonRpcResult(id, {});
-}
-
-// --- Offline fallback: keep the MCP server usable without NeatContext --------
-
-// Resolved per call, never fixed at startup: the user can save or create the
-// first context mid-session, and the next get_context has to stop telling them
-// there is nothing to connect. The list this reads is the same one the routing
-// menu is built from moments later, so it costs nothing extra.
-async function nothingConnectedText() {
-  const { contexts } = await listAllContexts().catch(() => ({ contexts: [] }));
-  return contexts.length === 0 ? NOTHING_EXISTS : NOTHING_CONNECTED;
-}
-
-async function notConnected(id) {
-  return jsonRpcResult(id, {
-    content: [{ type: "text", text: await nothingConnectedText() }],
-    isError: false
-  });
-}
-
-async function offlineResponse(message) {
-  const { id, method, params } = message;
-  if (method === "initialize") {
-    return jsonRpcResult(id, {
-      protocolVersion:
-        typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
-      capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
-      serverInfo: SERVER_INFO,
-      // Nothing is connected and NeatContext cannot be asked, so the session is
-      // told how to get grounded rather than left with no framing at all.
-      instructions: NO_CONTEXT_INSTRUCTIONS
-    });
-  }
-  if (method === "ping") return jsonRpcResult(id, {});
-  if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
-  if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
-  if (method === "tools/call" && params?.name === "get_context") {
-    return await notConnected(id);
-  }
-  return { jsonrpc: "2.0", id, error: { code: -32601, message: await nothingConnectedText() } };
 }
 
 // --- Routing: the session picks its own context ------------------------------
@@ -397,16 +260,14 @@ async function previewContext(id, target) {
   const state = await readRouting();
   const card = state.cards[target.id];
   const useWhen = card?.useWhen || target.routingDescription;
-  const lines = [`# ${target.name} (${target.kind})`, ""];
+  const lines = [`# ${target.name}`, ""];
   lines.push(useWhen || "No routing description has been derived for it yet.");
   if (card?.aliases?.length > 0) {
     lines.push("", `Also called: ${card.aliases.join(", ")}`);
   }
-  if (target.kind === "lite") {
-    const { files } = await listKnowledgeFiles(target.knowledgeFolder, { limit: 40 });
-    lines.push("", "Knowledge folder holds:", "");
-    lines.push(files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- (nothing yet)");
-  }
+  const { files } = await listKnowledgeFiles(target.knowledgeFolder, { limit: 40 });
+  lines.push("", "Knowledge folder holds:", "");
+  lines.push(files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- (nothing yet)");
   // Deliberately no profile prose. A profile is mostly behavioral, and text
   // telling the model how to answer would be acting on this context while the
   // session is still grounded in another one.
@@ -417,7 +278,7 @@ async function previewContext(id, target) {
 async function routingToolCall(message) {
   const { id, params } = message;
   const query = typeof params?.arguments?.context === "string" ? params.arguments.context : "";
-  const { contexts, client } = await listAllContexts();
+  const { contexts } = await listAllContexts();
   const resolution = resolveContext(contexts, query);
   if (resolution.error) {
     return toolText(
@@ -455,18 +316,7 @@ async function routingToolCall(message) {
     return toolText(id, refusal(policy, target), true);
   }
 
-  const result = await applySelection(target, client);
-  if (!result.ok) {
-    // Not "the app is closed": the target was resolved from a list the app
-    // served moments ago, so the only failure left is the app declining.
-    return toolText(
-      id,
-      `NeatContext refused to connect "${target.name}". Stay on the current context and tell ` +
-        "the user the switch did not happen.",
-      true
-    );
-  }
-
+  const result = await applySelection(target);
   // The alias is the only routing signal the user authors, and it arrives here
   // because a wrong route is the moment they say what it should have been.
   const alias = typeof args.alias === "string" ? await addAlias(target.id, args.alias) : null;
@@ -511,129 +361,52 @@ function refusal(policy, target) {
   );
 }
 
-// --- Bridge loop -------------------------------------------------------------
+// --- Server loop --------------------------------------------------------------
 
-const source = neatContextSource();
-let lastInitialize = null;
 let started = false;
 let lastVersion = undefined;
 
-function patchInitialize(response) {
-  if (response?.result?.capabilities) {
-    const tools = response.result.capabilities.tools ?? {};
-    response.result.capabilities.tools = { ...tools, listChanged: true };
-  }
-  return response;
-}
-
-// With nothing connected, NeatContext can still list the extension tools of the
-// context it served last: its runtime file outlives the connection. Advertising
-// them would tell the session it is grounded when get_context says it is not.
-function withConnectedTools(response, state) {
-  if (!state || state.connected || !Array.isArray(response?.result?.tools)) {
-    return response;
-  }
-  return {
-    ...response,
-    result: {
-      ...response.result,
-      tools: response.result.tools.filter((tool) => tool.name === GET_CONTEXT_TOOL.name)
-    }
-  };
-}
-
-async function forward(message) {
-  try {
-    let response = await source.postMcp(message);
-    if (isNotInitializedError(response) && message.method !== "initialize" && lastInitialize) {
-      // Backend was respawned or NeatContext just started: replay the handshake.
-      await source.postMcp(lastInitialize);
-      await source.postMcp({ jsonrpc: "2.0", method: "notifications/initialized" });
-      response = await source.postMcp(message);
-    }
-    return response;
-  } catch {
-    return await offlineResponse(message);
-  }
-}
-
-// What the host's tool list depends on. Switching between contexts — of either
-// kind — has to change this, so the extension tools of a standard context
-// appear and disappear live.
+// What the host's tool list depends on. Switching between contexts has to
+// change this; so does the routing mode, because leaving manual has to make the
+// routing tools appear without waiting for a restart.
 async function currentVersion() {
-  // The mode is part of it: leaving manual has to make the routing tools appear
-  // without waiting for a restart, and entering it has to take them away.
   const mode = resolveMode(await readRouting(), sessionId());
-  const lite = await activeLite();
-  if (lite) {
-    return `${mode}/${lite.missing ? "lite:missing" : `lite:${lite.record.id}`}`;
+  const context = await activeContext();
+  if (context) {
+    return `${mode}/${context.missing ? "context:missing" : context.record.id}`;
   }
-  const version = (await source.ensure())?.version ?? null;
-  return version === null ? null : `${mode}/${version}`;
+  return `${mode}/none`;
 }
 
 async function handleMessage(message) {
   const isNotification = message.id === undefined || message.id === null;
-  if (message.method === "initialize") {
-    lastInitialize = message;
-  }
 
-  // Routing tools belong to the plugin, not to either source: they decide which
-  // source serves the session next, so they are answered before that choice is
-  // made and are never forwarded to NeatContext.
+  // Routing tools decide which context serves the session next, so they are
+  // answered before that choice is read.
   if (message.method === "tools/call" && ROUTING_TOOLS.has(message.params?.name)) {
     writeLine(await routingToolCall(message));
     return;
   }
 
-  const lite = await activeLite();
-
-  // Re-attach the selected context before anything that reads it, so a
-  // NeatContext restart mid-session cannot silently strip the grounding. A lite
-  // context has nothing to re-attach: the selection file is the connection.
-  //
-  // The handshake counts: restarting the host with a standard context already
-  // remembered must reconnect it there, so the session is grounded from its
-  // first message and the first tools/list carries the extension tools —
-  // by construction, not by which message the host happens to send first.
-  let state;
-  if (!lite && (CONTEXT_METHODS.has(message.method) || message.method === "initialize")) {
-    state = await source.ensure();
-    if (state && state.version !== null) {
-      lastVersion = state.version;
-    }
-  }
-
-  // A hidden prompt is answered here rather than forwarded, so it behaves like
-  // the prompt it is not listed as: unknown.
-  const response = isHiddenPromptGet(message)
-    ? {
-        jsonrpc: "2.0",
-        id: message.id ?? null,
-        error: { code: -32602, message: `Unknown prompt: ${message.params?.name}` }
-      }
-    : lite
-      ? await liteResponse(message, lite)
-      : await forward(message);
+  const context = await activeContext();
+  const response = await contextResponse(message, context);
 
   if (message.method === "initialize" && response && response.result) {
-    patchInitialize(response);
     started = true;
     lastVersion = await currentVersion();
     startVersionWatch();
   }
 
   if (!isNotification && response) {
-    writeLine(await shapeResponse(message, response, lite, state));
+    writeLine(await shapeResponse(message, response));
   }
 }
 
-// What the plugin adds to whichever source answered: how connecting works here,
-// and the routing menu when there is one. Both ride on both channels on purpose.
-// In the handshake, so the session knows what else exists without having to call
-// anything; in every get_context result, because that one is re-read on every
-// call and the handshake cannot be. Change the mode mid-session and the second
-// channel is what makes it take effect.
+// What the plugin adds to whichever answer goes out: how connecting works here,
+// and the routing menu when there is one. Both ride on both channels on
+// purpose. In the handshake, so the session knows what else exists without
+// having to call anything; in every get_context result, because that one is
+// re-read on every call and the handshake cannot be.
 //
 // The connection rule goes last, so it is the closest thing to the answer the
 // session is about to write — and it is the one part that is never omitted.
@@ -667,24 +440,15 @@ async function withNotes(response, place) {
   };
 }
 
-async function shapeResponse(message, response, lite, state) {
-  if (message.method === "prompts/list") {
-    return withoutHiddenPrompts(response);
-  }
+async function shapeResponse(message, response) {
   if (message.method === "initialize" && response.result) {
     return withNotes(response, "instructions");
   }
   if (message.method === "tools/list") {
-    const connected = lite ? response : withConnectedTools(response, state);
-    return await withRoutingTools(connected);
+    return await withRoutingTools(response);
   }
   if (message.method === "tools/call" && message.params?.name === GET_CONTEXT_TOOL.name) {
-    // With nothing connected, NeatContext answers in terms of its own client:
-    // open the app, pick a context there. True of that client, wrong here — and
-    // the bridge already knows the connection state, so it says it itself rather
-    // than forwarding advice the user cannot act on from Claude Code.
-    const grounded = lite || state?.connected;
-    return withNotes(grounded ? response : await notConnected(message.id), "content");
+    return withNotes(response, "content");
   }
   return response;
 }

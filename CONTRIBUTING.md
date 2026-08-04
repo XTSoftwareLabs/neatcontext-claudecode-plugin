@@ -23,7 +23,7 @@ The plugin is dependency-free. Before opening a PR, sanity-check the scripts:
 ```bash
 npm run check           # node --check on each host helper script
 npm run validate:plugin # Claude Code marketplace validation, warnings included
-npm test                # host integration tests against a fake companion API
+npm test                # local storage and host integration tests
 npm run coverage        # every changed Claude-plugin source line must run in a test
 ```
 
@@ -50,7 +50,7 @@ process tree wrote. A line counts as covered if any one process ran it.
 
 That only works when those children exit on their own — a killed process never
 flushes its profile. Tests end a bridge session by closing its stdin
-(`closeSession` in `tests/fake-companion.mjs`), which is how the hosts shut down
+(`closeSession` in `tests/process-helpers.mjs`), which is how the hosts shut down
 stdio MCP servers too; don't swap it back for `child.kill()`.
 
 The gate reads `git diff`, which does not see **untracked** files. A brand-new
@@ -58,8 +58,9 @@ script is invisible to it — and so trivially "passes" — until you `git add` 
 Stage new files before trusting a green run locally; CI diffs a pushed branch,
 where everything is tracked already.
 
-Please keep the plugin decoupled from NeatContext's internals: it should only
-use the documented public companion API (see the README).
+Please keep the plugin runtime self-contained and host-neutral. Shared local
+storage behavior belongs in `shared/core/`; host wording and adapters stay in
+their host packages.
 
 ## Releases
 
@@ -140,3 +141,8 @@ host-neutral conversation-evidence projector. After editing it, run
 copies. `npm run check` includes a byte-for-byte drift check. Host trace parsers
 belong in their host directories and emit the shared semantic-block contract;
 do not add host transcript formats or environment variables to the shared file.
+
+The local Context runtime is canonical under `shared/core/` as well. After
+editing `context-store.mjs`, `local-state.mjs`, `routing.mjs`, `selection.mjs`,
+or `storage-home.mjs`, run `npm run sync:context`. The normal check rejects
+packaged copies that drift from those sources.

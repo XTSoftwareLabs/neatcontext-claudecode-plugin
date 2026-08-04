@@ -9,12 +9,7 @@
 // tool list fresh: the extension registers its tools directly and recomputes its
 // grounding notes on every turn.
 //
-// What does not change is the seam underneath. A session is served by one of two
-// sources, chosen per call from the recorded selection: a *standard* context is
-// NeatContext's and is fetched from the desktop app over the documented
-// companion HTTP contract, and a *lite* context is the plugin's own and is
-// answered from disk — no app, no network, so it keeps working with NeatContext
-// closed or never installed.
+// Contexts are answered locally from disk with no network dependency.
 //
 // Nothing here imports pi. Keeping the logic host-free is what lets the tests
 // drive it without a running agent, and it is the same reason `src/core` is
@@ -24,27 +19,22 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import "./session.mjs";
 import {
-  clientFor,
-  ensureConnection,
-  readDiscovery,
-  readSelection,
-  request
-} from "../core/companion-client.mjs";
-import {
-  createCapturedLite,
-  createLite,
-  deleteLite,
-  fingerprintLite,
-  importCapturedLite,
-  LITE_MISSING_MESSAGE,
-  LiteContextError,
+  createCapturedContext,
+  createContext as createStoredContext,
+  deleteContext as deleteStoredContext,
+  exportContext as exportStoredContext,
+  fingerprintContext,
+  importCapturedContext,
+  CONTEXT_MISSING_MESSAGE,
+  ContextError,
   listKnowledgeFiles,
-  previewCapturedLiteUpdate,
-  readLite,
+  previewCapturedContextUpdate,
+  readContext,
   readProfileText,
-  renderLiteContext,
-  updateCapturedLite
-} from "../core/lite-context.mjs";
+  renderContext,
+  updateCapturedContext
+} from "../core/context-store.mjs";
+import { clearSelection, readSelection } from "../core/local-state.mjs";
 import {
   addAlias,
   isCardStale,
@@ -62,7 +52,6 @@ import {
 } from "../core/routing.mjs";
 import {
   applySelection,
-  clearSelection,
   disconnectSelection,
   listAllContexts,
   resolveContext
@@ -71,38 +60,26 @@ import {
 export const PLUGIN_VERSION = "0.1.0";
 
 // The one thing to say when a session has nothing to ground in. It is
-// deliberately about what to do *here*: the app being closed, mid-restart, or
-// holding no connection are all the same situation from inside pi, and all of
-// them are answered by picking a context from this session.
+// deliberately about what to do in the current session.
 export const NOTHING_CONNECTED =
   "No NeatContext Context is connected to this session. Connect one with " +
-  "`/neatcontext-use`, or create a local one with `/neatcontext-create` — that one needs " +
-  "nothing else installed. Until then, do not answer from general knowledge.";
+  "`/neatcontext-use`, save this conversation with `/neatcontext-save`, or create one " +
+  "with `/neatcontext-create`. Until then, do not answer from general knowledge.";
 
-// How connecting works in pi, stated by the plugin because NeatContext cannot
-// state it: its own framing is written for its desktop client, where connecting
-// means opening the app, choosing a context and pressing a button. Forwarded
-// verbatim, that framing makes a session send the user off to do exactly that —
-// in a plugin whose whole point is that it never has to happen.
+// How connecting works in pi.
 const CONNECTION_RULE = `## Connecting a context, in pi
 
-Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext-use <name>\` run by the user. \`/neatcontext-disconnect\` disconnects the current one from this session. \`/neatcontext-create\` makes a new local one from here.
+Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext-use <name>\` run by the user. \`/neatcontext-disconnect\` disconnects the current one from this session. \`/neatcontext-save\` saves the current conversation and \`/neatcontext-create\` makes one from a knowledge folder.
 
-Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — not to connect a context, not to switch one, not to make one available. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
+There is no Desktop connection right now. Contexts are stored by this plugin. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
-const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and local knowledge stored on this machine.
+const CONTEXT_INSTRUCTIONS = `This session can be grounded in a NeatContext Context: one domain profile and local knowledge stored on this machine.
 
 Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
 
-A lite context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
+A context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
 
 Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
-
-const STANDARD_INSTRUCTIONS = `This session is grounded in a NeatContext Context: a domain profile, indexed knowledge, and the extension tools that context publishes.
-
-Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions. Read what it returns in full — it is your primary behavioral guide for this session — and use \`neatcontext_tool\` for the extension tools it lists.
-
-Cite the exact file path or record you rely on. When the context does not cover the question, say so instead of answering from general knowledge.`;
 
 // Unlike the MCP hosts, pi re-reads this every turn, so it can state the current
 // situation as a fact instead of hedging about a handshake it cannot revise.
@@ -111,119 +88,18 @@ const NO_CONTEXT_INSTRUCTIONS = `No NeatContext Context is connected to this ses
 When the user asks anything that depends on their own domain, documents, tools, or team conventions, call the get_context tool and let its answer decide:
 
 - If it returns a Context, ground your answer in it and cite what you used.
-- Only if it reports that nothing is connected, say so, and tell them to connect one with /neatcontext-use — or to create a local one with /neatcontext-create, which needs no other software.`;
-
-// Extension tools a standard context publishes are proxied through one tool
-// rather than registered individually. pi loads every registered tool's schema
-// into the system prompt for the whole session, and a context's tool list
-// changes when the user switches context — so registering them one-for-one would
-// both cost a schema per tool forever and go stale the moment `use_context`
-// runs. `get_context` names what is available; this calls it.
-export const EXTENSION_TOOL_NAME = "neatcontext_tool";
-
-const NO_EXTENSION_TOOLS =
-  "This connection publishes no extension tools. A lite context never has any, and a " +
-  "standard context only has the ones it was built with. Answer from what `get_context` " +
-  "returns.";
-
-function textOf(response) {
-  const content = response?.result?.content;
-  if (!Array.isArray(content)) {
-    return null;
-  }
-  return content
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n\n");
-}
-
-// --- NeatContext source: the documented companion HTTP contract --------------
-
-// The desktop app hosts the real NeatContext MCP surface behind POST /v1/mcp.
-// The other hosts reach it by relaying the agent's own JSON-RPC; pi has none to
-// relay, so this drives the same endpoint directly and owns the handshake.
-let handshakeDone = false;
-
-const INITIALIZE = {
-  jsonrpc: "2.0",
-  id: "neatcontext-init",
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-11-25",
-    capabilities: {},
-    clientInfo: { name: "neatcontext-pi", version: PLUGIN_VERSION }
-  }
-};
-
-async function postMcp(message, timeoutMs = 20000) {
-  const discovery = await readDiscovery();
-  if (!discovery) {
-    throw new Error("companion offline");
-  }
-  const response = await request(discovery, "POST", "/v1/mcp", { body: message, timeoutMs });
-  if (response.status === 202) {
-    return null; // notification accepted, no body
-  }
-  if (response.status >= 500) {
-    throw new Error(`companion error ${response.status}`);
-  }
-  return response.json;
-}
-
-async function handshake() {
-  await postMcp(INITIALIZE);
-  await postMcp({ jsonrpc: "2.0", method: "notifications/initialized" });
-  handshakeDone = true;
-}
-
-function isNotInitializedError(response) {
-  return response?.error?.code === -32002;
-}
-
-// One request against the app's MCP surface, with the re-handshake the app makes
-// necessary: it keeps its connection in memory, so restarting it (or starting it
-// after pi) leaves this process holding a session the app has never heard of.
-async function callCompanion(method, params) {
-  if (!handshakeDone) {
-    await handshake();
-  }
-  const message = { jsonrpc: "2.0", id: `neatcontext-${method}`, method, params };
-  let response = await postMcp(message);
-  if (isNotInitializedError(response)) {
-    handshakeDone = false;
-    await handshake();
-    response = await postMcp(message);
-  }
-  return response;
-}
-
-// Current connection state, with the remembered context put back first if the
-// app has forgotten it. Null when the app is unreachable, so an offline app
-// never looks like a disconnected context.
-async function ensureStandard() {
-  const discovery = await readDiscovery();
-  if (!discovery) {
-    return null;
-  }
-  try {
-    return await ensureConnection(clientFor(discovery));
-  } catch {
-    return null;
-  }
-}
+- Only if it reports that nothing is connected, say so, and tell them to connect one with /neatcontext-use, save this conversation with /neatcontext-save, or create one with /neatcontext-create.`;
 
 // --- which source serves this session ----------------------------------------
 
-// The selected lite context, or null when this session is on a standard one. A
-// selection whose context was deleted out-of-band resolves to `missing` so
-// get_context can say what happened instead of silently falling back to the app
-// and reporting "no context is connected".
-export async function activeLite() {
+// A selection whose context was deleted out-of-band resolves to `missing` so
+// get_context can report what happened.
+export async function activeContext() {
   const selection = await readSelection().catch(() => null);
-  if (!selection || selection.kind !== "lite") {
+  if (!selection || selection.available === false) {
     return null;
   }
-  const record = await readLite(selection.contextId).catch(() => null);
+  const record = await readContext(selection.contextId).catch(() => null);
   return record ? { record } : { missing: true, name: selection.contextName };
 }
 
@@ -255,101 +131,22 @@ export async function pluginNotes() {
 // survive being wrong about the current state. Here it is rebuilt each turn, so
 // it can simply describe what is true now.
 export async function sessionInstructions() {
-  const lite = await activeLite().catch(() => null);
-  let head;
-  if (lite) {
-    head = LITE_INSTRUCTIONS;
-  } else {
-    const state = await ensureStandard();
-    head = state?.connected ? STANDARD_INSTRUCTIONS : NO_CONTEXT_INSTRUCTIONS;
-  }
+  const context = await activeContext().catch(() => null);
+  const head = context ? CONTEXT_INSTRUCTIONS : NO_CONTEXT_INSTRUCTIONS;
   return `# NeatContext\n\n${head}\n\n${await pluginNotes()}`;
 }
 
 // --- get_context --------------------------------------------------------------
 
 export async function getContext() {
-  const lite = await activeLite();
-  if (lite) {
-    const body = lite.missing ? LITE_MISSING_MESSAGE : await renderLiteContext(lite.record);
+  const context = await activeContext();
+  if (context) {
+    const body = context.missing
+      ? CONTEXT_MISSING_MESSAGE
+      : await renderContext(context.record);
     return `${body}\n\n${await pluginNotes()}`;
   }
-
-  let state;
-  try {
-    state = await ensureStandard();
-  } catch {
-    state = null;
-  }
-  if (!state?.connected) {
-    // With nothing connected, NeatContext answers in terms of its own client:
-    // open the app, pick a context there. True of that client, wrong here — and
-    // the plugin already knows the connection state, so it says it itself rather
-    // than forwarding advice the user cannot act on from pi.
-    return `${NOTHING_CONNECTED}\n\n${await pluginNotes()}`;
-  }
-
-  let response;
-  try {
-    response = await callCompanion("tools/call", { name: "get_context", arguments: {} });
-  } catch {
-    return `${NOTHING_CONNECTED}\n\n${await pluginNotes()}`;
-  }
-  const body = textOf(response);
-  if (body === null) {
-    return `${NOTHING_CONNECTED}\n\n${await pluginNotes()}`;
-  }
-  const tools = await listExtensionTools().catch(() => []);
-  const toolNote =
-    tools.length > 0
-      ? `\n\n## Extension tools on this connection\n\n${tools
-          .map((tool) => `- \`${tool.name}\` — ${tool.description ?? "(no description)"}`)
-          .join("\n")}\n\nCall them with the \`${EXTENSION_TOOL_NAME}\` tool.`
-      : "";
-  return `${body}${toolNote}\n\n${await pluginNotes()}`;
-}
-
-// --- extension tools ----------------------------------------------------------
-
-// `get_context` is the plugin's own tool and is registered natively, so it is
-// dropped here rather than offered twice under two different names.
-export async function listExtensionTools() {
-  const lite = await activeLite();
-  if (lite) {
-    return [];
-  }
-  const state = await ensureStandard();
-  if (!state?.connected) {
-    return [];
-  }
-  const response = await callCompanion("tools/list", {});
-  const tools = response?.result?.tools;
-  return Array.isArray(tools) ? tools.filter((tool) => tool.name !== "get_context") : [];
-}
-
-export async function callExtensionTool({ tool, arguments: args } = {}) {
-  const name = typeof tool === "string" ? tool.trim() : "";
-  if (name.length === 0) {
-    return "Pass the extension tool to call as `tool`.";
-  }
-  const available = await listExtensionTools().catch(() => []);
-  if (available.length === 0) {
-    return NO_EXTENSION_TOOLS;
-  }
-  if (!available.some((entry) => entry.name === name)) {
-    return (
-      `"${name}" is not an extension tool on this connection. The available ones are: ` +
-      `${available.map((entry) => entry.name).join(", ")}.`
-    );
-  }
-  const response = await callCompanion("tools/call", {
-    name,
-    arguments: args && typeof args === "object" ? args : {}
-  });
-  if (response?.error) {
-    return `The "${name}" tool failed: ${response.error.message ?? "unknown error"}.`;
-  }
-  return textOf(response) ?? `The "${name}" tool returned nothing.`;
+  return `${NOTHING_CONNECTED}\n\n${await pluginNotes()}`;
 }
 
 // --- routing tools ------------------------------------------------------------
@@ -358,16 +155,14 @@ async function previewContextText(target) {
   const state = await readRouting();
   const card = state.cards[target.id];
   const useWhen = card?.useWhen || target.routingDescription;
-  const lines = [`# ${target.name} (${target.kind})`, ""];
+  const lines = [`# ${target.name}`, ""];
   lines.push(useWhen || "No routing description has been derived for it yet.");
   if (card?.aliases?.length > 0) {
     lines.push("", `Also called: ${card.aliases.join(", ")}`);
   }
-  if (target.kind === "lite") {
-    const { files } = await listKnowledgeFiles(target.knowledgeFolder, { limit: 40 });
-    lines.push("", "Knowledge folder holds:", "");
-    lines.push(files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- (nothing yet)");
-  }
+  const { files } = await listKnowledgeFiles(target.knowledgeFolder, { limit: 40 });
+  lines.push("", "Knowledge folder holds:", "");
+  lines.push(files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- (nothing yet)");
   // Deliberately no profile prose. A profile is mostly behavioral, and text
   // telling the model how to answer would be acting on this context while the
   // session is still grounded in another one.
@@ -423,7 +218,7 @@ function refusal(policy, target) {
 // switches except `/neatcontext-use`.
 export async function useContext(args = {}) {
   const query = typeof args.context === "string" ? args.context : "";
-  const { contexts, client } = await listAllContexts();
+  const { contexts } = await listAllContexts();
   const resolution = resolveContext(contexts, query);
   if (resolution.error) {
     return noSingleMatch(query, contexts);
@@ -450,16 +245,7 @@ export async function useContext(args = {}) {
     return refusal(policy, target);
   }
 
-  const result = await applySelection(target, client);
-  if (!result.ok) {
-    // Not "the app is closed": the target was resolved from a list the app
-    // served moments ago, so the only failure left is the app declining.
-    return (
-      `NeatContext refused to connect "${target.name}". Stay on the current context and tell ` +
-      "the user the switch did not happen."
-    );
-  }
-
+  const result = await applySelection(target);
   // The alias is the only routing signal the user authors, and it arrives here
   // because a wrong route is the moment they say what it should have been.
   const alias = typeof args.alias === "string" ? await addAlias(target.id, args.alias) : null;
@@ -482,28 +268,16 @@ export async function useContext(args = {}) {
 
 // --- what the commands need to know about the world ---------------------------
 
-// Both kinds of context and what is connected. The connection is read through
-// `ensureConnection` so a NeatContext restart — which drops the app's in-memory
-// connection — is repaired here rather than reported as "no context is
-// connected". A lite selection is authoritative on its own and needs no app.
+// The local contexts and the selection recorded for this session.
 export async function loadState() {
   const selection = await readSelection();
-  const { contexts, lite, standard, client } = await listAllContexts();
-
-  let appState = null;
-  if (client) {
-    appState = (await ensureConnection(client).catch(() => null)) ?? {
-      connected: null,
-      restored: false
-    };
-  }
+  const { contexts } = await listAllContexts();
 
   let connected = null;
-  if (selection?.kind === "lite") {
-    const record = lite.find((context) => context.id === selection.contextId) ?? null;
+  if (selection && selection.available !== false) {
+    const record = contexts.find((context) => context.id === selection.contextId) ?? null;
     const routing = await readRouting();
     connected = {
-      kind: "lite",
       id: selection.contextId,
       name: record?.name ?? selection.contextName,
       record,
@@ -511,37 +285,12 @@ export async function loadState() {
         ? isCardStale(routing.cards[selection.contextId], await readProfileText(record))
         : false
     };
-  } else if (appState?.connected) {
-    const id = appState.connected.contextId;
-    connected = {
-      kind: "standard",
-      id,
-      name:
-        standard.find((context) => context.id === id)?.name ??
-        appState.connected.contextName ??
-        id,
-      restored: appState.restored === true
-    };
   }
 
-  return {
-    client,
-    contexts,
-    lite,
-    standard,
-    selection,
-    connected,
-    restoreFailed: appState?.restoreFailed === true
-  };
+  return { contexts, selection, connected };
 }
 
 // --- commands -----------------------------------------------------------------
-
-// Why the standard contexts are missing is not worth three different sentences:
-// app closed, no workspace loaded, and none created all lead the user to the
-// same place. One line covers every case.
-const NO_STANDARD_NOTE =
-  "(none — make sure the NeatContext desktop app is installed and running)";
 
 function formatSection(title, contexts, offset, connectedId, emptyNote) {
   if (contexts.length === 0) {
@@ -555,38 +304,19 @@ function formatSection(title, contexts, offset, connectedId, emptyNote) {
   return [title, ...rows].join("\n");
 }
 
-// The two kinds are listed apart, because they are different things: one is the
-// plugin's own, one comes from the desktop app. Lite goes first — it is the half
-// that is always there. The numbering runs continuously across both sections so
-// `use <number>` still indexes the merged list the way the user is reading it.
 export function formatList(state) {
-  const standard = state.contexts.filter((context) => context.kind === "standard");
-  const connectedId = state.connected?.id ?? null;
-  return [
-    formatSection(
-      "Lite contexts:",
-      state.lite,
-      0,
-      connectedId,
-      "(none — create one with `/neatcontext-create`)"
-    ),
-    formatSection("Standard contexts:", standard, state.lite.length, connectedId, NO_STANDARD_NOTE)
-  ].join("\n\n");
-}
-
-export function formatLiteList(state) {
   return formatSection(
-    "Lite contexts:",
-    state.lite,
+    "Contexts:",
+    state.contexts,
     0,
     state.connected?.id ?? null,
-    "(none — create one with `/neatcontext-create`)"
+    "(none — save this conversation with `/neatcontext-save`, or create one with `/neatcontext-create`)"
   );
 }
 
 export async function commandStatus() {
   const state = await loadState();
-  const { connected } = state;
+  const { connected, selection } = state;
   const routing = await readRouting();
   const mode = resolveMode(routing, sessionId());
   const lines = [];
@@ -604,15 +334,15 @@ export async function commandStatus() {
     }
   };
 
-  if (connected?.kind === "lite") {
+  if (connected) {
     if (!connected.record) {
       lines.push(
-        `The lite context "${connected.name}" is connected but is no longer on disk. ` +
+        `The context "${connected.name}" is connected but is no longer on disk. ` +
           "Use `/neatcontext-list` to pick another, or `/neatcontext-create` to make a new one."
       );
       return lines.join("\n");
     }
-    lines.push(`Connected context: ${connected.name} (lite)`);
+    lines.push(`Connected context: ${connected.name}`);
     lines.push(`  Domain profile:   ${connected.record.profilePath}`);
     const folder = connected.record.knowledgeFolder;
     const { files } = await listKnowledgeFiles(folder);
@@ -632,43 +362,28 @@ export async function commandStatus() {
         );
       }
     }
-    lines.push("  Lite contexts have no extension tools.");
     reportMode();
     return lines.join("\n");
   }
-
-  if (connected) {
+  if (selection?.available === false) {
     lines.push(
-      connected.restored
-        ? `Connected context: ${connected.name} (standard; NeatContext had restarted, the plugin reconnected it).`
-        : `Connected context: ${connected.name} (standard)`
+      `The previously selected context "${selection.contextName}" is not available to this ` +
+        "plugin. Its stale selection has been cleared; use `/neatcontext-use` to pick a local Context."
     );
     reportMode();
     return lines.join("\n");
-  }
-
-  if (state.restoreFailed) {
-    return (
-      "The context this session was using is no longer available in NeatContext. " +
-      "Use `/neatcontext-use` to pick another one."
-    );
   }
   lines.push("No context is connected yet. Use `/neatcontext-use` to pick one.");
   reportMode();
   return lines.join("\n");
 }
 
-export async function commandList({ liteOnly = false } = {}) {
+export async function commandList() {
   const state = await loadState();
-  return liteOnly ? formatLiteList(state) : formatList(state);
+  return formatList(state);
 }
 
-// A context with no routing description can only be routed to by name, which is
-// what makes a standard context — whose profile the plugin cannot read until it
-// is connected — much worse at routing than a lite one. Connecting is the moment
-// that changes: the document is readable now, and the session that ran this
-// command has a model to summarize it with. So the fix is to say so, here, and
-// let the session do it.
+// A context with no routing description can only be routed to by name.
 async function nudgeForDescription(target) {
   const routing = await readRouting();
   if ((routing.cards[target.id]?.useWhen || target.routingDescription || "").length > 0) {
@@ -696,19 +411,10 @@ export async function commandUse(query = "") {
   }
 
   const target = resolution.context;
-  const result = await applySelection(target, state.client);
-  if (!result.ok) {
-    // No "the app is not running" case here: a standard context can only be
-    // resolved from a list the app itself served, so by the time a target exists
-    // the client does too. Only the app refusing the connection is left.
-    return `Could not connect "${target.name}". Try again from the app.`;
-  }
+  const result = await applySelection(target);
   const nudge = (await nudgeForDescription(target)) ?? "";
-  return result.kind === "lite"
-    ? `Connected the "${result.name}" lite context. Your next messages in this session ` +
-        `will be grounded in its domain profile and knowledge folder.${nudge}`
-    : `Connected the "${result.name}" context. Your next messages in this session will be ` +
-        `grounded in it.${nudge}`;
+  return `Connected the "${result.name}" context. Your next messages in this session ` +
+    `will be grounded in its domain profile and knowledge folder.${nudge}`;
 }
 
 export async function commandDisconnect() {
@@ -718,10 +424,7 @@ export async function commandDisconnect() {
   if (!connected && !remembered) {
     return "No context is connected to this session.";
   }
-  const result = await disconnectSelection(state.client);
-  if (!result.ok) {
-    return "Could not disconnect the context. Try again.";
-  }
+  await disconnectSelection();
   return `Disconnected the "${connected?.name ?? remembered.contextName}" context from this session.`;
 }
 
@@ -758,15 +461,9 @@ export async function commandMode(query = "", { global: isGlobal = false } = {})
     : head;
 }
 
-const UPGRADE_NOTE =
-  "A lite context holds one domain profile, one primary knowledge folder, and saved " +
-  "conversation notes. For multiple linked knowledge folders, extension tools " +
-  "(incidents, logs, deploys), and indexed retrieval, create a standard context in the " +
-  "NeatContext desktop app.";
-
 export async function createContext({ name, knowledgeFolder, profile, useWhen } = {}) {
   try {
-    const created = await createLite({
+    const created = await createStoredContext({
       name: typeof name === "string" ? name : "",
       knowledgeFolder: typeof knowledgeFolder === "string" ? knowledgeFolder : "",
       profile: typeof profile === "string" ? profile : ""
@@ -782,7 +479,7 @@ export async function createContext({ name, knowledgeFolder, profile, useWhen } 
     const line = typeof useWhen === "string" ? useWhen : "";
     await putCard(record.id, { useWhen: line, source: profileText });
 
-    const lines = [`Created the "${record.name}" lite context.`];
+    const lines = [`Created the "${record.name}" context.`];
     lines.push(`  Domain profile:   ${record.profilePath}`);
     if (line.trim().length > 0) {
       lines.push(`  Routes here for:  ${line.trim()}`);
@@ -797,10 +494,9 @@ export async function createContext({ name, knowledgeFolder, profile, useWhen } 
         "The folder has no files yet — put the TSGs, runbooks, or docs in it before asking questions."
       );
     }
-    lines.push(UPGRADE_NOTE);
     return lines.join("\n");
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       return error.message;
     }
     throw error;
@@ -820,10 +516,7 @@ export async function describeContext({ context, useWhen, alias } = {}) {
   const line = typeof useWhen === "string" ? useWhen : "";
   const parts = [];
   if (line.trim().length > 0) {
-    let source;
-    if (target.kind === "lite") {
-      source = (await readProfileText(target)) ?? undefined;
-    }
+    const source = (await readProfileText(target)) ?? undefined;
     const card = await putCard(target.id, { useWhen: line, source });
     parts.push(`"${target.name}" now routes for: ${card.useWhen}`);
   }
@@ -844,7 +537,7 @@ export async function importContext({ from, name } = {}) {
     return "Pass the shared bundle folder to import from.";
   }
   try {
-    const result = await importCapturedLite({
+    const result = await importCapturedContext({
       bundleFolder: source,
       name: typeof name === "string" ? name : ""
     });
@@ -861,7 +554,54 @@ export async function importContext({ from, name } = {}) {
       `The shared source folder (${source}) was left untouched.`
     ].join("\n");
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
+      return error.message;
+    }
+    throw error;
+  }
+}
+
+export async function exportContext({ context, destination, force = false } = {}) {
+  const targetFolder = typeof destination === "string" ? destination : "";
+  if (targetFolder.trim().length === 0) {
+    return "Pass the destination folder with --to <folder>.";
+  }
+
+  const state = await loadState();
+  let target = null;
+  const query = typeof context === "string" ? context.trim() : "";
+  if (query.length === 0) {
+    if (!state.connected?.record) {
+      return `Which context should I export?\n\n${formatList(state)}`;
+    }
+    target = state.connected.record;
+  } else {
+    const resolution = resolveContext(state.contexts, query);
+    if (resolution.error) {
+      return `No single context matched "${query}".\n\n${formatList(state)}`;
+    }
+    target = resolution.context;
+  }
+
+  const routing = await readRouting();
+  try {
+    const result = await exportStoredContext({
+      record: target,
+      destination: targetFolder,
+      force,
+      routingDescription: routing.cards[target.id]?.useWhen
+    });
+    return [
+      result.replaced
+        ? `Exported the "${result.record.name}" context, replacing what was there.`
+        : `Exported the "${result.record.name}" context.`,
+      `  Bundle folder:   ${result.destination}`,
+      `  Knowledge files: ${result.knowledgeFileCount}`,
+      `  Import it with:  /neatcontext-import ${result.destination}`,
+      "This context was not changed — the export is a copy."
+    ].join("\n");
+  } catch (error) {
+    if (error instanceof ContextError) {
       return error.message;
     }
     throw error;
@@ -873,29 +613,14 @@ export async function importContext({ from, name } = {}) {
 export async function deleteContext(query = "", { confirm = false } = {}) {
   const state = await loadState();
   if (query.trim().length === 0) {
-    return { done: false, text: `Which lite context should I delete?\n\n${formatLiteList(state)}` };
+    return { done: false, text: `Which context should I delete?\n\n${formatList(state)}` };
   }
 
-  const resolution = resolveContext(state.lite, query);
+  const resolution = resolveContext(state.contexts, query);
   if (resolution.error) {
-    // Standard contexts are the desktop app's to manage; say so specifically
-    // rather than "not found", which reads as a bug when the name is right there
-    // in the list.
-    const standardMatch = state.contexts.find(
-      (context) =>
-        context.kind === "standard" && context.name.toLowerCase().includes(query.toLowerCase())
-    );
-    if (standardMatch) {
-      return {
-        done: false,
-        text:
-          `"${standardMatch.name}" is a standard context. Only lite contexts can be deleted ` +
-          "from here — delete standard ones in the NeatContext desktop app."
-      };
-    }
     return {
       done: false,
-      text: `No single lite context matched "${query}".\n\n${formatLiteList(state)}`
+      text: `No single context matched "${query}".\n\n${formatList(state)}`
     };
   }
 
@@ -905,7 +630,7 @@ export async function deleteContext(query = "", { confirm = false } = {}) {
       done: false,
       target,
       text: [
-        `This will delete the "${target.name}" lite context:`,
+        `This will delete the "${target.name}" context:`,
         `  ${target.directory}`,
         target.knowledgeManaged
           ? `Its generated knowledge folder (${target.knowledgeFolder}) is inside the bundle and will be deleted.`
@@ -914,12 +639,12 @@ export async function deleteContext(query = "", { confirm = false } = {}) {
     };
   }
 
-  const deleted = await deleteLite(target.id);
+  const deleted = await deleteStoredContext(target.id);
   if (!deleted) {
-    return { done: true, text: `The "${target.name}" lite context was already gone.` };
+    return { done: true, text: `The "${target.name}" context was already gone.` };
   }
   const lines = [
-    `Deleted the "${deleted.name}" lite context.`,
+    `Deleted the "${deleted.name}" context.`,
     deleted.knowledgeManaged
       ? `Its generated knowledge folder (${deleted.knowledgeFolder}) was deleted with it.`
       : `Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`
@@ -990,7 +715,7 @@ async function renderUpdatePlan(target) {
     "Save action: update",
     `Context name: ${target.name}`,
     `targetId: ${target.id}`,
-    `baseHash: ${await fingerprintLite(target)}`,
+    `baseHash: ${await fingerprintContext(target)}`,
     `Routing description: ${useWhen || "(none — derive one from the profile)"}`,
     target.knowledgeManaged
       ? "Knowledge ownership: this context owns its knowledge folder."
@@ -1028,22 +753,14 @@ export async function saveTarget(query = "") {
   const state = await loadState();
 
   if (query.trim().length === 0) {
-    if (state.connected?.kind === "lite" && state.connected.record) {
+    if (state.connected?.record) {
       return renderUpdatePlan(state.connected.record);
     }
-    if (state.selection?.kind === "lite") {
+    if (state.selection) {
       return (
         "Save action: unavailable\n" +
-        `The connected lite context "${state.selection.contextName}" no longer exists on disk.\n` +
+        `The connected context "${state.selection.contextName}" no longer exists on disk.\n` +
         "Connect another context or provide a new context name."
-      );
-    }
-    if (state.connected?.kind === "standard" || state.selection?.kind === "standard") {
-      const name = state.connected?.name ?? state.selection.contextName;
-      return (
-        "Save action: unavailable\n" +
-        `The connected context "${name}" is a standard context and cannot be updated by this plugin.\n` +
-        "Provide a new name to save this conversation as a lite context."
       );
     }
     return (
@@ -1057,7 +774,6 @@ export async function saveTarget(query = "") {
     candidates.push({
       id: state.selection.contextId,
       name: state.selection.contextName,
-      kind: state.selection.kind,
       missing: true
     });
   }
@@ -1067,24 +783,17 @@ export async function saveTarget(query = "") {
     return [
       "Save action: choose",
       `More than one context is named "${query}".`,
-      ...exact.map((context) => `  ${context.name} (${context.kind})`),
+      ...exact.map((context) => `  ${context.name}`),
       "Choose a distinct new name or resolve the duplicate before saving."
     ].join("\n");
   }
   if (exact.length === 1) {
     const target = exact[0];
-    if (target.missing && target.kind === "lite") {
+    if (target.missing) {
       return (
         "Save action: unavailable\n" +
-        `The lite context "${target.name}" no longer exists on disk.\n` +
-        "Choose a new context name or connect another lite context."
-      );
-    }
-    if (target.kind !== "lite") {
-      return (
-        "Save action: unavailable\n" +
-        `The existing context "${target.name}" is a standard context and cannot be updated by this plugin.\n` +
-        "Choose a different name to create a lite context."
+        `The context "${target.name}" no longer exists on disk.\n` +
+        "Choose a new context name or connect another context."
       );
     }
     return renderUpdatePlan(target);
@@ -1095,7 +804,7 @@ export async function saveTarget(query = "") {
     return [
       "Save action: choose",
       `No context is named exactly "${query}", but these names are similar:`,
-      ...similar.map((context) => `  ${context.name} (${context.kind})`),
+      ...similar.map((context) => `  ${context.name}`),
       `Confirm whether to create "${query}", or use an exact existing name to update it.`
     ].join("\n");
   }
@@ -1110,7 +819,7 @@ function formatChangedFiles(label, files) {
 function renderUpdatePreview(preview) {
   const { record, changes } = preview;
   const lines = [
-    `Update the "${record.name}" lite context?`,
+    `Update the "${record.name}" context?`,
     `  Domain profile: ${preview.profileChanged ? "changed" : "unchanged"}`,
     `  Routing description: ${preview.routingChanged ? "changed" : "unchanged"}`,
     `  Knowledge files: ${changes.added.length} added, ${changes.updated.length} updated, ` +
@@ -1158,21 +867,24 @@ export async function saveContext(args = {}) {
     if (typeof targetId === "string" && targetId.length > 0) {
       capture.targetId = targetId;
       capture.baseHash = typeof baseHash === "string" ? baseHash : "";
-      const preview = await previewCapturedLiteUpdate(capture);
+      const preview = await previewCapturedContextUpdate(capture);
       if (!preview.changed) {
         return `The capture does not change the "${preview.record.name}" context.`;
       }
       if (confirm !== true) {
         return renderUpdatePreview(preview);
       }
-      const result = await updateCapturedLite(capture);
+      const result = await updateCapturedContext({
+        ...capture,
+        updatedFrom: "pi-conversation"
+      });
       await putCard(result.record.id, {
         useWhen: result.routingDescription,
         source: result.profileText
       }).catch(() => undefined);
       return [
         `Updated context: ${result.record.name}`,
-        `Lite context folder: ${result.record.directory}`,
+        `Context folder: ${result.record.directory}`,
         `Profile path: ${result.record.profilePath}`,
         `Knowledge folder: ${result.record.knowledgeFolder}`,
         ...(result.record.knowledgeManaged
@@ -1182,20 +894,23 @@ export async function saveContext(args = {}) {
       ].join("\n");
     }
 
-    const result = await createCapturedLite({ ...capture, capturedFrom: "pi-conversation" });
+    const result = await createCapturedContext({
+      ...capture,
+      capturedFrom: "pi-conversation"
+    });
     await putCard(result.record.id, {
       useWhen: result.routingDescription,
       source: result.profileText
     }).catch(() => undefined);
     return [
       `Saved context: ${result.record.name}`,
-      `Lite context folder: ${result.record.directory}`,
+      `Context folder: ${result.record.directory}`,
       `Profile path: ${result.record.profilePath}`,
       `Knowledge folder: ${result.record.knowledgeFolder}`,
       `Connect it with: /neatcontext-use ${result.record.name}`
     ].join("\n");
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       return error.message;
     }
     throw error;

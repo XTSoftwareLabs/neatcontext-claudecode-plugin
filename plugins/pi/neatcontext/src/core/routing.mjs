@@ -19,13 +19,13 @@
 // and sourced from the wrong team's documents. Mode, cooldown, and the decision
 // log all exist to keep that mistake cheap.
 //
-// One file, beside the discovery file, so NEATCONTEXT_COMPANION_FILE stays the
-// single override that isolates tests.
+// One file in the local NeatContext data directory. Tests can redirect the
+// directory with NEATCONTEXT_HOME.
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { discoveryFilePath } from "./companion-client.mjs";
+import { neatContextHome } from "./storage-home.mjs";
 import { sessionId } from "./session.mjs";
 
 export { sessionId };
@@ -40,7 +40,7 @@ const MAX_DECISIONS = 100;
 const MAX_SESSIONS = 20;
 
 export function routingFilePath() {
-  return path.join(path.dirname(discoveryFilePath()), "plugin-routing.json");
+  return path.join(neatContextHome(), "plugin-routing.json");
 }
 
 export function hashSource(text) {
@@ -107,10 +107,16 @@ async function update(mutate) {
   return result;
 }
 
+// The read-mutate-write cycle, for state this module does not interpret. The
+// save nudge keeps its counters inside `sessions[id].save` — same file, same
+// session cap, same 0600 — without this module having to know their shape.
+export function updateRouting(mutate) {
+  return update(mutate);
+}
+
 // --- cards -------------------------------------------------------------------
 
-// `source` is the text the line was derived from — the domain profile for a lite
-// context, the context document for a standard one. Its hash is what later tells
+// `source` is the text the line was derived from. Its hash is what later tells
 // us the line has drifted from a profile the user edited by hand.
 export function putCard(contextId, { useWhen, source, aliases }) {
   return update((state) => {
@@ -275,7 +281,7 @@ export function renderMenu(entries, { connectedId, mode } = {}) {
   const lines = ["## Contexts available on this machine", ""];
   for (const entry of entries) {
     const marker = entry.id === connectedId ? " **(connected)**" : "";
-    lines.push(`- **${entry.name}** (${entry.kind})${marker} — ${describe(entry)}`);
+    lines.push(`- **${entry.name}**${marker} — ${describe(entry)}`);
   }
   lines.push("");
   lines.push(
@@ -299,8 +305,7 @@ export function menuEntries(contexts, state) {
   return contexts.map((context) => ({
     id: context.id,
     name: context.name,
-    kind: context.kind,
-    // Captured lite contexts carry their routing description in the portable
+    // Captured contexts carry their routing description in the portable
     // bundle as well as in this machine's routing cache. The embedded copy is
     // what makes a teammate's imported bundle routable before they have ever
     // connected it.

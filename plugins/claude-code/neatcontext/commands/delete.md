@@ -1,22 +1,21 @@
 ---
-description: Delete a lite NeatContext context
-argument-hint: [lite context name or number]
+description: Delete a NeatContext Context
+argument-hint: [context name or number]
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
-Delete a lite context. Standard contexts cannot be deleted from here — they are
-managed in the NeatContext desktop app.
+Delete a local Context.
 
-Your lite contexts:
+Your contexts:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list --lite`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list`
 
 The user asked to delete: $ARGUMENTS
 
 Based on the list above:
 
-- If no name was given, or it does not clearly match exactly one lite context,
+- If no name was given, or it does not clearly match exactly one context,
   show the list and ask which one they mean. Do not guess.
 - If it matches one, run the following preview first:
 
@@ -39,5 +38,3 @@ Based on the list above:
   and relay the result. If the deleted context was the connected one, tell them
   the session is no longer grounded and they can pick another with
   `/neatcontext:use`.
-- If the name they gave belongs to a standard context, tell them it has to be
-  deleted in the NeatContext desktop app instead.

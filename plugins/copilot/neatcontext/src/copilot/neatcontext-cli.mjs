@@ -2,43 +2,38 @@
 // the slash command relays to the user. Subcommands:
 //
 //   status                     show the connected context
-//   list [--lite]              list the lite contexts on this machine
+//   list                       list the contexts on this machine
 //   use [query]                connect by number, exact name, or unique substring
 //   disconnect                 disconnect the context from this session
-//   create --name --knowledge  create a lite context (--profile-from <file>)
+//   create --name --knowledge  create a context (--profile-from <file>)
 //   save-target [name]          decide whether save creates or updates
 //   save --from <capture.json>  create or update from this conversation
 //   import --from <bundle>      import a portable conversation context
 //   export --to <folder>        copy a saved context's bundle out for sharing
-//   delete <query> [--yes]     delete a lite context
+//   delete <query> [--yes]     delete a context
 //   mode [auto|ask|manual]     how the session may route itself between contexts
 //   describe <query> --use-when   record what a context should be routed for
 //   alias <query> --called        record what the user calls a context
-//
-// This is the GitHub Copilot variant: it serves lite contexts only — the
-// plugin's own, stored on this machine. NeatContext desktop's standard
-// contexts are not reachable from here, so nothing in this file talks to the
-// desktop app, and no path here needs it installed.
 //
 // Exit code is always 0: the output is meant to be read, not branched on.
 
 import { readFile, rm } from "node:fs/promises";
 import "./session.mjs";
-import { clearSelection, readSelection } from "../core/companion-client.mjs";
+import { clearSelection, readSelection } from "../core/local-state.mjs";
 import {
-  createCapturedLite,
-  createLite,
-  deleteLite,
-  exportLite,
-  fingerprintLite,
-  importCapturedLite,
-  listLite,
-  LiteContextError,
+  createCapturedContext,
+  createContext,
+  deleteContext,
+  exportContext,
+  fingerprintContext,
+  importCapturedContext,
+  listContexts,
+  ContextError,
   listKnowledgeFiles,
-  previewCapturedLiteUpdate,
+  previewCapturedContextUpdate,
   readProfileText,
-  updateCapturedLite
-} from "../core/lite-context.mjs";
+  updateCapturedContext
+} from "../core/context-store.mjs";
 import {
   addAlias,
   isCardStale,
@@ -51,9 +46,9 @@ import {
 } from "../core/routing.mjs";
 import { applySelection, disconnectSelection, resolveContext } from "../core/selection.mjs";
 
-const LITE_NOTE =
-  "A lite context holds one domain profile, one primary knowledge folder, and saved " +
-  "conversation notes. The Copilot plugin stores lite contexts only.";
+const CONTEXT_NOTE =
+  "A context holds one domain profile, one primary knowledge folder, and optional " +
+  "saved conversation notes.";
 
 function print(line = "") {
   process.stdout.write(`${line}\n`);
@@ -98,29 +93,26 @@ function formatSection(title, contexts, connectedId, emptyNote) {
   return [title, ...rows].join("\n");
 }
 
-// One section: the Copilot plugin has no standard contexts to list apart.
 function formatList(state) {
   return formatSection(
-    "Lite contexts:",
-    state.lite,
+    "Contexts:",
+    state.contexts,
     state.connected?.id ?? null,
     "(none — save this conversation with `/neatcontext:save`, or create one from a docs folder with `/neatcontext:create`)"
   );
 }
 
-// Everything the commands need about the world: the lite contexts, and which
-// one this session has selected. A lite selection is authoritative on its own —
-// there is no app connection to repair or consult.
+// Everything the commands need about the world: the contexts, and which one
+// this session has selected.
 async function loadState() {
   const selection = await readSelection();
-  const lite = (await listLite()).map((context) => ({ ...context, kind: "lite" }));
+  const contexts = await listContexts();
 
   let connected = null;
-  if (selection?.kind === "lite") {
-    const record = lite.find((context) => context.id === selection.contextId) ?? null;
+  if (selection && selection.available !== false) {
+    const record = contexts.find((context) => context.id === selection.contextId) ?? null;
     const routing = await readRouting();
     connected = {
-      kind: "lite",
       id: selection.contextId,
       name: record?.name ?? selection.contextName,
       record,
@@ -130,11 +122,11 @@ async function loadState() {
     };
   }
 
-  return { contexts: lite, lite, selection, connected };
+  return { contexts, selection, connected };
 }
 
 async function commandStatus(state) {
-  const { connected } = state;
+  const { connected, selection } = state;
   const routing = await readRouting();
   const mode = resolveMode(routing, sessionId());
   // Reported alongside the connection because the two together are the whole
@@ -154,12 +146,12 @@ async function commandStatus(state) {
   if (connected) {
     if (!connected.record) {
       print(
-        `The lite context "${connected.name}" is connected but is no longer on disk. ` +
+        `The context "${connected.name}" is connected but is no longer on disk. ` +
           "Use `/neatcontext:list` to pick another, or `/neatcontext:create` to make a new one."
       );
       return;
     }
-    print(`Connected context: ${connected.name} (lite)`);
+    print(`Connected context: ${connected.name}`);
     print(`  Domain profile:   ${connected.record.profilePath}`);
     const folder = connected.record.knowledgeFolder;
     const { files } = await listKnowledgeFiles(folder);
@@ -183,10 +175,19 @@ async function commandStatus(state) {
     return;
   }
 
+  if (selection?.available === false) {
+    print(
+      `The previously selected context "${selection.contextName}" is not available to this ` +
+        "plugin. Its stale selection has been cleared; use `/neatcontext:use` to pick a local Context."
+    );
+    reportMode();
+    return;
+  }
+
   // With an empty store `/neatcontext:use` has nothing to offer, so pointing
   // at it is a dead end for anyone who has just installed the plugin.
   print(
-    state.lite.length === 0
+    state.contexts.length === 0
       ? "No context is connected, and there are none yet. Save this conversation as your first " +
         "one with `/neatcontext:save`, or build one from a folder of docs with " +
         "`/neatcontext:create`."
@@ -244,13 +245,13 @@ async function printUpdateTarget(target) {
   print("Save action: update");
   print(`Context name: ${target.name}`);
   print(`Context id: ${target.id}`);
-  print(`Base hash: ${await fingerprintLite(target)}`);
+  print(`Base hash: ${await fingerprintContext(target)}`);
   print(`Profile path: ${target.profilePath}`);
   print(`Routing description: ${useWhen || "(none — derive one from the profile)"}`);
   print(`Knowledge folder: ${target.knowledgeFolder}`);
   if (target.knowledgeManaged) {
     print(`Conversation knowledge folder: ${target.knowledgeFolder}`);
-    print("Knowledge ownership: managed by this lite context");
+    print("Knowledge ownership: managed by this context");
   } else {
     print(`Conversation knowledge folder: ${target.conversationKnowledgeFolder}`);
     print(
@@ -268,10 +269,10 @@ async function commandSaveTarget(state, query) {
       await printUpdateTarget(state.connected.record);
       return;
     }
-    if (state.selection?.kind === "lite") {
+    if (state.selection) {
       print("Save action: unavailable");
       print(
-        `The connected lite context "${state.selection.contextName}" no longer exists on disk.`
+        `The connected context "${state.selection.contextName}" no longer exists on disk.`
       );
       print("Connect another context or provide a new context name.");
       return;
@@ -289,7 +290,6 @@ async function commandSaveTarget(state, query) {
     candidates.push({
       id: state.selection.contextId,
       name: state.selection.contextName,
-      kind: state.selection.kind,
       missing: true
     });
   }
@@ -301,7 +301,7 @@ async function commandSaveTarget(state, query) {
     print("Save action: choose");
     print(`More than one context is named "${query}".`);
     for (const context of exact) {
-      print(`  ${context.name} (${context.kind})`);
+      print(`  ${context.name}`);
     }
     print("Choose a distinct new name or resolve the duplicate before saving.");
     return;
@@ -310,8 +310,8 @@ async function commandSaveTarget(state, query) {
     const target = exact[0];
     if (target.missing) {
       print("Save action: unavailable");
-      print(`The lite context "${target.name}" no longer exists on disk.`);
-      print("Choose a new context name or connect another lite context.");
+      print(`The context "${target.name}" no longer exists on disk.`);
+      print("Choose a new context name or connect another context.");
       return;
     }
     await printUpdateTarget(target);
@@ -323,7 +323,7 @@ async function commandSaveTarget(state, query) {
     print("Save action: choose");
     print(`No context is named exactly "${query}", but these names are similar:`);
     for (const context of similar) {
-      print(`  ${context.name} (${context.kind})`);
+      print(`  ${context.name}`);
     }
     print(`Confirm whether to create "${query}", or use an exact existing name to update it.`);
     return;
@@ -357,17 +357,12 @@ async function commandUse(state, query) {
   }
 
   const target = resolution.context;
-  // No client: a lite selection is written to disk and needs no desktop app.
-  const result = await applySelection(target, null);
-  if (result.ok) {
-    print(
-      `Connected the "${result.name}" lite context. Your next messages in this session ` +
-        "will be grounded in its domain profile and knowledge folder."
-    );
-    await nudgeForDescription(target);
-    return;
-  }
-  print(`Could not connect "${target.name}". Try again.`);
+  const result = await applySelection(target);
+  print(
+    `Connected the "${result.name}" context. Your next messages in this session ` +
+      "will be grounded in its domain profile and knowledge folder."
+  );
+  await nudgeForDescription(target);
 }
 
 async function commandDisconnect(state) {
@@ -378,11 +373,7 @@ async function commandDisconnect(state) {
     return;
   }
 
-  const result = await disconnectSelection(null);
-  if (!result.ok) {
-    print("Could not disconnect the context. Try again.");
-    return;
-  }
+  await disconnectSelection();
 
   const name = connected?.name ?? remembered.contextName;
   print(`Disconnected the "${name}" context from this session.`);
@@ -496,7 +487,7 @@ async function commandCreate(flags) {
   }
 
   try {
-    const { record, profileText, knowledgeFileCount } = await createLite({
+    const { record, profileText, knowledgeFileCount } = await createContext({
       name,
       knowledgeFolder: knowledge,
       profile
@@ -511,7 +502,7 @@ async function commandCreate(flags) {
     // created.
     const useWhen = typeof flags["use-when"] === "string" ? flags["use-when"] : "";
     await putCard(record.id, { useWhen, source: profileText });
-    print(`Created the "${record.name}" lite context.`);
+    print(`Created the "${record.name}" context.`);
     print(`  Domain profile:   ${record.profilePath}`);
     if (useWhen.trim().length > 0) {
       print(`  Routes here for:  ${useWhen.trim()}`);
@@ -524,9 +515,9 @@ async function commandCreate(flags) {
     if (knowledgeFileCount === 0) {
       print("The folder has no files yet — put the TSGs, runbooks, or docs in it before asking questions.");
     }
-    print(LITE_NOTE);
+    print(CONTEXT_NOTE);
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       print(error.message);
       return;
     }
@@ -537,7 +528,7 @@ async function commandCreate(flags) {
 // The model in the active Copilot session writes the capture spec: it is the
 // only process that can see the conversation, and reusing it avoids a second
 // model call or a transcript reader. This command validates that output, turns
-// it into files, and creates or updates the selected lite context.
+// it into files, and creates or updates the selected context.
 function printChangedFiles(label, files) {
   if (files.length === 0) {
     return;
@@ -547,7 +538,7 @@ function printChangedFiles(label, files) {
 
 function printUpdatePreview(preview) {
   const { record, changes } = preview;
-  print(`Update the "${record.name}" lite context?`);
+  print(`Update the "${record.name}" context?`);
   print(`  Domain profile: ${preview.profileChanged ? "changed" : "unchanged"}`);
   print(`  Routing description: ${preview.routingChanged ? "changed" : "unchanged"}`);
   print(
@@ -584,7 +575,7 @@ async function commandSave(flags) {
 
   try {
     if (typeof capture.targetId === "string" && capture.targetId.length > 0) {
-      const preview = await previewCapturedLiteUpdate(capture);
+      const preview = await previewCapturedContextUpdate(capture);
       if (!preview.changed) {
         print(`The capture does not change the "${preview.record.name}" context.`);
         return;
@@ -593,7 +584,10 @@ async function commandSave(flags) {
         printUpdatePreview(preview);
         return;
       }
-      const result = await updateCapturedLite(capture);
+      const result = await updateCapturedContext({
+        ...capture,
+        updatedFrom: "copilot-conversation"
+      });
       await putCard(result.record.id, {
         useWhen: result.routingDescription,
         source: result.profileText
@@ -603,7 +597,7 @@ async function commandSave(flags) {
       }
       // The save nudge's "nothing new since the last save" suppressor starts
       print(`Updated context: ${result.record.name}`);
-      print(`Lite context folder: ${result.record.directory}`);
+      print(`Context folder: ${result.record.directory}`);
       print(`Profile path: ${result.record.profilePath}`);
       print(`Knowledge folder: ${result.record.knowledgeFolder}`);
       if (!result.record.knowledgeManaged) {
@@ -613,7 +607,7 @@ async function commandSave(flags) {
       return;
     }
 
-    const result = await createCapturedLite({
+    const result = await createCapturedContext({
       ...capture,
       capturedFrom: "copilot-conversation"
     });
@@ -624,12 +618,12 @@ async function commandSave(flags) {
     if (flags.consume === true || flags.consume === "true") {
       await rm(source, { force: true });
     }
-    print(`Lite context folder: ${result.record.directory}`);
+    print(`Context folder: ${result.record.directory}`);
     print(`Profile path: ${result.record.profilePath}`);
     print(`Knowledge folder: ${result.record.knowledgeFolder}`);
     print(`Use command: /neatcontext:use ${result.record.name}`);
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       print(error.message);
       return;
     }
@@ -641,7 +635,7 @@ async function commandImport(flags) {
   const source = typeof flags.from === "string" ? flags.from : "";
   const name = typeof flags.name === "string" ? flags.name : "";
   try {
-    const result = await importCapturedLite({ bundleFolder: source, name });
+    const result = await importCapturedContext({ bundleFolder: source, name });
     await putCard(result.record.id, {
       useWhen: result.routingDescription,
       source: result.profileText
@@ -656,7 +650,7 @@ async function commandImport(flags) {
     print(`  Connect it with:  /neatcontext:use ${result.record.name}`);
     print(`The shared source folder (${source}) was left untouched.`);
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       print(error.message);
       return;
     }
@@ -679,15 +673,15 @@ async function commandExport(state, query, flags) {
     if (state.connected?.record) {
       target = state.connected.record;
     } else {
-      print("Which lite context should I export?");
+      print("Which context should I export?");
       print("");
       print(formatList(state));
       return;
     }
   } else {
-    const resolution = resolveContext(state.lite, query);
+    const resolution = resolveContext(state.contexts, query);
     if (resolution.error) {
-      print(`No single lite context matched "${query}".`);
+      print(`No single context matched "${query}".`);
       print("");
       print(formatList(state));
       return;
@@ -697,7 +691,7 @@ async function commandExport(state, query, flags) {
 
   const routing = await readRouting();
   try {
-    const result = await exportLite({
+    const result = await exportContext({
       record: target,
       destination,
       force: flags.force === true || flags.force === "true",
@@ -713,7 +707,7 @@ async function commandExport(state, query, flags) {
     print(`  Import it with:   /neatcontext:import ${result.destination}`);
     print("This context was not changed — the export is a copy.");
   } catch (error) {
-    if (error instanceof LiteContextError) {
+    if (error instanceof ContextError) {
       print(error.message);
       return;
     }
@@ -723,15 +717,15 @@ async function commandExport(state, query, flags) {
 
 async function commandDelete(state, query, flags) {
   if (query.length === 0) {
-    print("Which lite context should I delete?");
+    print("Which context should I delete?");
     print("");
     print(formatList(state));
     return;
   }
 
-  const resolution = resolveContext(state.lite, query);
+  const resolution = resolveContext(state.contexts, query);
   if (resolution.error) {
-    print(`No single lite context matched "${query}".`);
+    print(`No single context matched "${query}".`);
     print("");
     print(formatList(state));
     return;
@@ -739,7 +733,7 @@ async function commandDelete(state, query, flags) {
 
   const target = resolution.context;
   if (flags.yes !== true && flags.yes !== "true") {
-    print(`This will delete the "${target.name}" lite context:`);
+    print(`This will delete the "${target.name}" context:`);
     print(`  ${target.directory}`);
     print(
       target.knowledgeManaged
@@ -750,18 +744,15 @@ async function commandDelete(state, query, flags) {
     return;
   }
 
-  const deleted = await deleteLite(target.id);
-  if (!deleted) {
-    print(`The "${target.name}" lite context was already gone.`);
-    return;
-  }
-  print(`Deleted the "${deleted.name}" lite context.`);
+  const deleted = await deleteContext(target.id);
+  const removed = deleted ?? target;
+  print(`Deleted the "${removed.name}" context.`);
   print(
-    deleted.knowledgeManaged
-      ? `Its generated knowledge folder (${deleted.knowledgeFolder}) was deleted with it.`
-      : `Its knowledge folder (${deleted.knowledgeFolder}) was left untouched.`
+    removed.knowledgeManaged
+      ? `Its generated knowledge folder (${removed.knowledgeFolder}) was deleted with it.`
+      : `Its knowledge folder (${removed.knowledgeFolder}) was left untouched.`
   );
-  if (state.connected?.id === deleted.id) {
+  if (state.connected?.id === removed.id) {
     await clearSelection();
     print("It was the connected context, so this session is no longer grounded in one.");
   }

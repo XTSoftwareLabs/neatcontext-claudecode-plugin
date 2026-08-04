@@ -1,5 +1,5 @@
 ---
-description: Import a shared NeatContext lite-context bundle
+description: Import a shared NeatContext context bundle
 ---
 
 Call Kimi Code's `Skill` tool and load the plugin-contributed

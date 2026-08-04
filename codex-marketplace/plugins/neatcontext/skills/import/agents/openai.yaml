@@ -1,7 +1,7 @@
 interface:
   display_name: "Import Context"
-  short_description: "Import a shared lite context bundle"
-  default_prompt: "Use $neatcontext:import to import a shared lite context bundle."
+  short_description: "Import a shared context bundle"
+  default_prompt: "Use $neatcontext:import to import a shared context bundle."
 
 policy:
   allow_implicit_invocation: false

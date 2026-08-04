@@ -2,7 +2,7 @@
 // Profiles and knowledge are deliberately not injected here; get_context loads
 // only the selected context after routing has chosen it.
 
-import { readSelection } from "../src/core/companion-client.mjs";
+import { readSelection } from "../src/core/local-state.mjs";
 import { configureSessionId } from "../src/core/session.mjs";
 import {
   menuEntries,
@@ -34,13 +34,14 @@ const [{ contexts }, state, selection] = await Promise.all([
   readSelection().catch(() => null)
 ]);
 const mode = resolveMode(state, threadId);
+const selected = selection?.available === false ? null : selection;
 const menu = renderMenu(menuEntries(contexts, state), {
-  connectedId: selection?.contextId ?? null,
+  connectedId: selected?.contextId ?? null,
   mode
 });
 
-const groundingGuidance = selection
-  ? `The "${selection.contextName}" context is selected for this thread. For a request in its scope, call \`get_context\` only if its result is not already present since the latest context switch or compaction; otherwise reuse the existing result. Do not call \`get_context\` merely to check connection status.`
+const groundingGuidance = selected
+  ? `The "${selected.contextName}" context is selected for this thread. For a request in its scope, call \`get_context\` only if its result is not already present since the latest context switch or compaction; otherwise reuse the existing result. Do not call \`get_context\` merely to check connection status.`
   : contexts.length > 0
     ? "No NeatContext context is selected for this thread. Do not call `get_context` to check connection status. Follow the routing menu, and load grounding only after `use_context` succeeds."
     : "No NeatContext contexts are currently available. Do not call `get_context`. Continue normal work without NeatContext grounding unless the user asks to create or import a context.";
@@ -48,7 +49,7 @@ const groundingGuidance = selection
 const guidance = [
   "NeatContext is installed for this Codex thread.",
   groundingGuidance,
-  "Connect or switch contexts inside this thread with `use_context` or the explicit `$neatcontext:use` skill. Disconnect the current context with `$neatcontext:disconnect`. Do not tell the user to select a context in the desktop app.",
+  "Connect or switch contexts inside this thread with `use_context` or the explicit `$neatcontext:use` skill. Disconnect the current context with `$neatcontext:disconnect`. There is no Desktop connection right now.",
   menu,
   "Use `$neatcontext:save` to preserve durable work from the visible conversation. Never parse Codex transcript files for that workflow."
 ]

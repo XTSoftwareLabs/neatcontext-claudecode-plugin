@@ -36,18 +36,16 @@ Then run `/reload`
 - `/neatcontext:save [name]` — save reusable work from the visible conversation.
 - `/neatcontext:use [name or number]` — connect or switch this session.
 - `/neatcontext:disconnect` — disconnect only this session.
-- `/neatcontext:list` — list lite and standard contexts.
+- `/neatcontext:list` — list contexts on this machine.
 - `/neatcontext:status` — show the selection and routing mode.
-- `/neatcontext:create` — create a lite context around an existing knowledge folder.
-- `/neatcontext:import [folder]` — import a shared lite-context bundle.
+- `/neatcontext:create` — create a context around an existing knowledge folder.
+- `/neatcontext:import [folder]` — import a shared context bundle.
 - `/neatcontext:export [name] [folder]` — export a saved context as a shareable bundle.
-- `/neatcontext:delete [name or number]` — preview and delete a lite context.
+- `/neatcontext:delete [name or number]` — preview and delete a context.
 - `/neatcontext:mode [auto|ask|manual]` — show or change routing behavior.
 
-Each Kimi Code session keeps its own selection. Lite contexts are fully local
-and do not require the NeatContext desktop app. Standard contexts use the
-desktop companion on `127.0.0.1` and can expose the extensions configured for
-that context.
+Each Kimi Code session keeps its own selection. Contexts are fully local. There
+is no NeatContext Desktop connection right now.
 
 See the repository [Privacy Policy](../../../PRIVACY.md) for storage, network,
 retention, and model-provider details.

@@ -1,31 +1,26 @@
-// Lite contexts: the local, NeatContext-free half of the plugin.
+// Local Context storage shared by every NeatContext host plugin.
 //
-// A lite context is created from an AI coding host and lives entirely on disk, so it
-// works with the NeatContext desktop app closed — or never installed. It is
-// deliberately small: one domain profile, one primary knowledge folder,
-// optional saved conversation notes, no extensions, and no prompts. Anything
-// richer is what the desktop app is for.
+// A Context lives entirely on disk: one domain profile, one primary knowledge
+// folder, and optional saved conversation notes. It needs no other process.
 //
-//   <home>/lite/<slug>-<suffix>/context.json   { schema, id, name, kind, ... }
-//   <home>/lite/<slug>-<suffix>/profile.md     the domain profile, hand-editable
-//   <home>/lite/<slug>-<suffix>/knowledge/     conversation capture or update supplement
+//   <home>/contexts/<slug>-<suffix>/context.json   versioned metadata
+//   <home>/contexts/<slug>-<suffix>/profile.md     hand-editable domain profile
+//   <home>/contexts/<slug>-<suffix>/knowledge/     capture or update supplement
 //
-// <home> is the directory holding the companion discovery file, so
-// NEATCONTEXT_COMPANION_FILE stays the single override that isolates tests.
-//
-// `/neatcontext-create` references a user-owned knowledge folder and never
+// The create workflow references a user-owned knowledge folder and never
 // copies or deletes it. Saving more conversation work into one of those
 // contexts writes a supplement inside the context directory. A context first
-// made by `/neatcontext-save` owns its complete generated knowledge folder.
+// made by save owns its complete generated knowledge folder.
 
 import { createHash, randomBytes } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { discoveryFilePath } from "./companion-client.mjs";
+import { neatContextHome } from "./storage-home.mjs";
 
-export const LITE_ID_PREFIX = "lite:";
-const SCHEMA = 1;
+export const CONTEXT_ID_PREFIX = "context:";
+export const CONTEXT_SCHEMA = 2;
+const LEGACY_SCHEMA = 1;
 const MAX_NAME_LENGTH = 80;
 const MAX_LISTED_FILES = 200;
 const MAX_LISTING_DEPTH = 3;
@@ -37,7 +32,7 @@ const MAX_ROUTING_DESCRIPTION = 240;
 const UPDATE_LOCK_STALE_MS = 60_000;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", ".svn", ".hg", "__pycache__"]);
 
-export class LiteContextError extends Error {}
+export class ContextError extends Error {}
 
 function isConversationCapture(origin) {
   return (
@@ -46,12 +41,12 @@ function isConversationCapture(origin) {
   );
 }
 
-export function liteHome() {
-  return path.join(path.dirname(discoveryFilePath()), "lite");
+export function contextHome() {
+  return path.join(neatContextHome(), "contexts");
 }
 
-export function isLiteId(id) {
-  return typeof id === "string" && id.startsWith(LITE_ID_PREFIX);
+export function legacyContextHome() {
+  return path.join(neatContextHome(), "lite");
 }
 
 function slugify(name) {
@@ -60,11 +55,13 @@ function slugify(name) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug || "lite-context";
+  return slug || "context";
 }
 
 function recordFor(directory, parsed) {
-  if (parsed?.kind !== "lite" || typeof parsed.id !== "string" || typeof parsed.name !== "string") {
+  const legacy = parsed?.schema === LEGACY_SCHEMA && parsed?.kind === "lite";
+  const current = parsed?.schema === CONTEXT_SCHEMA && parsed?.kind === undefined;
+  if ((!legacy && !current) || typeof parsed.id !== "string" || typeof parsed.name !== "string") {
     return null;
   }
   const storedKnowledgeFolder =
@@ -81,13 +78,14 @@ function recordFor(directory, parsed) {
   return {
     id: parsed.id,
     name: parsed.name,
-    kind: "lite",
+    schema: legacy ? LEGACY_SCHEMA : CONTEXT_SCHEMA,
+    legacy,
     directory,
     knowledgeFolder,
     knowledgeManaged,
     // `/create` contexts keep their user-owned folder untouched. Conversation
     // updates for those contexts live in this bundle-local supplement instead,
-    // so every lite context can be updated without claiming ownership of linked
+    // so every Context can be updated without claiming ownership of linked
     // files. Older manifests need no migration: the path becomes real on the
     // first update.
     conversationKnowledgeFolder: knowledgeManaged ? null : path.join(directory, "knowledge"),
@@ -105,37 +103,98 @@ function recordFor(directory, parsed) {
   };
 }
 
-// Every readable lite context, sorted by name. A directory that is missing or
-// holds an unreadable context.json is skipped rather than failing the whole
-// list: one broken context must not hide the others.
-export async function listLite() {
+async function readableContext(directory) {
+  try {
+    const parsed = JSON.parse(await readFile(path.join(directory, "context.json"), "utf8"));
+    return recordFor(directory, parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function upgradeLegacyManifest(directory) {
+  const manifestPath = path.join(directory, "context.json");
+  const temporaryPath = path.join(
+    directory,
+    `.context-migration-${randomBytes(6).toString("hex")}.json`
+  );
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (parsed?.schema !== LEGACY_SCHEMA || parsed?.kind !== "lite") return;
+    parsed.schema = CONTEXT_SCHEMA;
+    parsed.profileFile = "profile.md";
+    delete parsed.kind;
+    await writeFile(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    await rename(temporaryPath, manifestPath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
+// Migrate one validated legacy directory at a time. Both roots and both schema
+// versions remain readable, so an interruption resumes on the next list.
+export async function migrateLegacyContexts() {
   let entries;
   try {
-    entries = await readdir(liteHome(), { withFileTypes: true });
+    entries = await readdir(legacyContextHome(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  await mkdir(contextHome(), { recursive: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) {
+      continue;
+    }
+    const source = path.join(legacyContextHome(), entry.name);
+    const target = path.join(contextHome(), entry.name);
+    if (!(await readableContext(source)) || (await directoryExists(target))) {
+      continue;
+    }
+    // A concurrent process may move or upgrade this directory first. Either
+    // readable representation is safe because both roots are scanned below.
+    try {
+      await rename(source, target);
+      await upgradeLegacyManifest(target);
+    } catch {}
+  }
+}
+
+async function scanContextRoot(root) {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
   } catch {
     return [];
   }
   const records = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) {
-      continue;
-    }
-    const directory = path.join(liteHome(), entry.name);
-    try {
-      const parsed = JSON.parse(await readFile(path.join(directory, "context.json"), "utf8"));
-      const record = recordFor(directory, parsed);
-      if (record) {
-        records.push(record);
-      }
-    } catch {
-      // Half-written or hand-broken: not a context we can serve.
-    }
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const record = await readableContext(path.join(root, entry.name));
+    if (record) records.push(record);
   }
-  return records.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return records;
 }
 
-export async function readLite(id) {
-  const contexts = await listLite();
+// Every readable Context, sorted by name. One malformed directory never hides
+// the others. The neutral root wins if an interrupted migration left a duplicate
+// identifier in both locations.
+export async function listContexts() {
+  await migrateLegacyContexts();
+  const records = [
+    ...(await scanContextRoot(contextHome())),
+    ...(await scanContextRoot(legacyContextHome()))
+  ];
+  const byId = new Map();
+  for (const record of records) {
+    if (!byId.has(record.id)) byId.set(record.id, record);
+  }
+  return [...byId.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+}
+
+export async function readContext(id) {
+  const contexts = await listContexts();
   return contexts.find((context) => context.id === id) ?? null;
 }
 
@@ -161,13 +220,13 @@ async function directoryExists(target) {
 function normalizeName(name) {
   const cleanName = (name ?? "").trim();
   if (cleanName.length === 0) {
-    throw new LiteContextError("A context name is required.");
+    throw new ContextError("A context name is required.");
   }
   if (cleanName.length > MAX_NAME_LENGTH) {
-    throw new LiteContextError(`Keep the context name under ${MAX_NAME_LENGTH} characters.`);
+    throw new ContextError(`Keep the context name under ${MAX_NAME_LENGTH} characters.`);
   }
   if (/[\r\n]/.test(cleanName)) {
-    throw new LiteContextError("A context name must be a single line.");
+    throw new ContextError("A context name must be a single line.");
   }
   return cleanName;
 }
@@ -175,20 +234,19 @@ function normalizeName(name) {
 function normalizeProfile(profile) {
   const cleanProfile = (profile ?? "").trim();
   if (cleanProfile.length === 0) {
-    throw new LiteContextError("The domain profile is empty. Describe what the context is for.");
+    throw new ContextError("The domain profile is empty. Describe what the context is for.");
   }
   if (Buffer.byteLength(cleanProfile, "utf8") > MAX_PROFILE_BYTES) {
-    throw new LiteContextError("Keep the domain profile under 128 KB.");
+    throw new ContextError("Keep the domain profile under 128 KB.");
   }
   return `${cleanProfile}\n`;
 }
 
 async function ensureUniqueName(cleanName) {
-  const existing = await listLite();
+  const existing = await listContexts();
   if (existing.some((context) => context.name.toLowerCase() === cleanName.toLowerCase())) {
-    throw new LiteContextError(
-      `A lite context named "${cleanName}" already exists. Pick another name, or delete ` +
-        "that one with `/neatcontext-delete`."
+    throw new ContextError(
+      `A context named "${cleanName}" already exists. Pick another name or delete that one first.`
     );
   }
 }
@@ -197,24 +255,24 @@ function contextPaths(cleanName) {
   const suffix = randomBytes(6).toString("hex");
   return {
     suffix,
-    directory: path.join(liteHome(), `${slugify(cleanName)}-${suffix}`),
-    staging: path.join(liteHome(), `.staging-${suffix}`)
+    directory: path.join(contextHome(), `${slugify(cleanName)}-${suffix}`),
+    staging: path.join(contextHome(), `.staging-${suffix}`)
   };
 }
 
 // Creates the context from an already-answered wizard. Everything is validated
 // before anything is written, and the context is assembled in a temp directory
 // then renamed into place, so a failure never leaves a half-context behind.
-export async function createLite({ name, knowledgeFolder, profile }) {
+export async function createContext({ name, knowledgeFolder, profile }) {
   const cleanName = normalizeName(name);
   const profileText = normalizeProfile(profile);
 
   const folder = path.resolve((knowledgeFolder ?? "").trim());
   if ((knowledgeFolder ?? "").trim().length === 0) {
-    throw new LiteContextError("A knowledge folder is required.");
+    throw new ContextError("A knowledge folder is required.");
   }
   if (!(await directoryExists(folder))) {
-    throw new LiteContextError(
+    throw new ContextError(
       `No folder at ${folder}. Give me a path to an existing folder holding the TSGs, ` +
         "runbooks, or docs this context should use."
     );
@@ -224,10 +282,10 @@ export async function createLite({ name, knowledgeFolder, profile }) {
 
   const { suffix, directory, staging } = contextPaths(cleanName);
   const record = {
-    schema: SCHEMA,
-    id: `${LITE_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
+    schema: CONTEXT_SCHEMA,
+    id: `${CONTEXT_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
     name: cleanName,
-    kind: "lite",
+    profileFile: "profile.md",
     createdAt: new Date().toISOString(),
     revision: 1,
     knowledgeFolder: folder
@@ -258,12 +316,12 @@ export async function createLite({ name, knowledgeFolder, profile }) {
 function normalizeRoutingDescription(value) {
   const description = (value ?? "").trim().replace(/\s+/g, " ");
   if (description.length === 0) {
-    throw new LiteContextError(
+    throw new ContextError(
       "The routing description is empty. Say what future requests belong in this context."
     );
   }
   if (description.length > MAX_ROUTING_DESCRIPTION) {
-    throw new LiteContextError(
+    throw new ContextError(
       `Keep the routing description under ${MAX_ROUTING_DESCRIPTION} characters.`
     );
   }
@@ -272,12 +330,12 @@ function normalizeRoutingDescription(value) {
 
 function normalizeCaptureKnowledge(knowledge) {
   if (!Array.isArray(knowledge) || knowledge.length === 0) {
-    throw new LiteContextError(
+    throw new ContextError(
       "The capture has no knowledge files. Include at least knowledge/session-summary.md."
     );
   }
   if (knowledge.length > MAX_CAPTURE_FILES) {
-    throw new LiteContextError(`Keep a conversation capture to ${MAX_CAPTURE_FILES} files or fewer.`);
+    throw new ContextError(`Keep a conversation capture to ${MAX_CAPTURE_FILES} files or fewer.`);
   }
 
   const files = [];
@@ -303,53 +361,53 @@ function normalizeCaptureKnowledge(knowledge) {
           /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)
       )
     ) {
-      throw new LiteContextError(
+      throw new ContextError(
         `Invalid knowledge file path "${portablePath || "(empty)"}". Use a short relative path.`
       );
     }
     if (!portablePath.toLowerCase().endsWith(".md")) {
-      throw new LiteContextError(
+      throw new ContextError(
         `Knowledge file "${portablePath}" must be Markdown (a .md file).`
       );
     }
     const key = portablePath.toLowerCase();
     if (seen.has(key)) {
-      throw new LiteContextError(`Knowledge file "${portablePath}" appears more than once.`);
+      throw new ContextError(`Knowledge file "${portablePath}" appears more than once.`);
     }
     if ([...seen].some((other) => key.startsWith(`${other}/`) || other.startsWith(`${key}/`))) {
-      throw new LiteContextError(`Knowledge file "${portablePath}" conflicts with another path.`);
+      throw new ContextError(`Knowledge file "${portablePath}" conflicts with another path.`);
     }
     seen.add(key);
 
     const content = typeof entry?.content === "string" ? entry.content.trim() : "";
     if (content.length === 0) {
-      throw new LiteContextError(`Knowledge file "${portablePath}" is empty.`);
+      throw new ContextError(`Knowledge file "${portablePath}" is empty.`);
     }
     const text = `${content}\n`;
     const bytes = Buffer.byteLength(text, "utf8");
     if (bytes > MAX_CAPTURE_FILE_BYTES) {
-      throw new LiteContextError(`Knowledge file "${portablePath}" is larger than 256 KB.`);
+      throw new ContextError(`Knowledge file "${portablePath}" is larger than 256 KB.`);
     }
     totalBytes += bytes;
     if (totalBytes > MAX_CAPTURE_TOTAL_BYTES) {
-      throw new LiteContextError("Keep the generated knowledge bundle under 1 MB.");
+      throw new ContextError("Keep the generated knowledge bundle under 1 MB.");
     }
     files.push({ path: portablePath, text });
   }
 
   if (!seen.has("session-summary.md")) {
-    throw new LiteContextError(
+    throw new ContextError(
       "The capture must include session-summary.md so a future session has an entry point."
     );
   }
   return files;
 }
 
-// Saves work already present in the host conversation. Unlike `createLite`,
+// Saves work already present in the host conversation. Unlike `createContext`,
 // this owns the knowledge it writes. Relative storage is the portability
 // contract: copying this one directory to another machine keeps every pointer
 // valid without exposing or repairing an absolute path from the creator.
-export async function createCapturedLite({
+export async function createCapturedContext({
   name,
   profile,
   routingDescription,
@@ -364,10 +422,10 @@ export async function createCapturedLite({
 
   const { suffix, directory, staging } = contextPaths(cleanName);
   const record = {
-    schema: SCHEMA,
-    id: `${LITE_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
+    schema: CONTEXT_SCHEMA,
+    id: `${CONTEXT_ID_PREFIX}${slugify(cleanName)}-${suffix}`,
     name: cleanName,
-    kind: "lite",
+    profileFile: "profile.md",
     createdAt: new Date().toISOString(),
     revision: 1,
     knowledgeFolder: "knowledge",
@@ -416,7 +474,7 @@ async function readGeneratedKnowledge(record) {
     limit: MAX_CAPTURE_FILES + 1
   });
   if (truncated || files.length > MAX_CAPTURE_FILES) {
-    throw new LiteContextError(
+    throw new ContextError(
       "This context has too many generated knowledge files to update safely."
     );
   }
@@ -433,7 +491,7 @@ async function readGeneratedKnowledge(record) {
 // The optimistic-concurrency token used between drafting an update and
 // applying it. Linked `/create` knowledge is deliberately excluded: save never
 // rewrites those user-owned files. Everything save can replace is included.
-export async function fingerprintLite(record) {
+export async function fingerprintContext(record) {
   const profile = await readProfileText(record);
   const knowledge = await readGeneratedKnowledge(record);
   const hash = createHash("sha256");
@@ -484,14 +542,14 @@ function knowledgeChanges(before, after) {
 
 function requireCurrentBase(record, actual, expected) {
   if (actual !== expected) {
-    throw new LiteContextError(
+    throw new ContextError(
       `The "${record.name}" context changed while this update was being prepared. ` +
-        "Run `/neatcontext-save` again so the newer content is preserved."
+        "Run `/neatcontext:save` again so the newer content is preserved."
     );
   }
 }
 
-async function prepareCapturedLiteUpdate({
+async function prepareCapturedContextUpdate({
   targetId,
   baseHash,
   name,
@@ -499,20 +557,20 @@ async function prepareCapturedLiteUpdate({
   routingDescription,
   knowledge
 }) {
-  const record = await readLite(targetId);
+  const record = await readContext(targetId);
   if (!record) {
-    throw new LiteContextError("The lite context selected for this update no longer exists.");
+    throw new ContextError("The context selected for this update no longer exists.");
   }
   const suppliedName = normalizeName(name);
   if (suppliedName.toLowerCase() !== record.name.toLowerCase()) {
-    throw new LiteContextError(
+    throw new ContextError(
       `The update was prepared for "${suppliedName}", but the target is "${record.name}".`
     );
   }
   if (typeof baseHash !== "string" || baseHash.length === 0) {
-    throw new LiteContextError("The update has no base hash. Resolve the save target again.");
+    throw new ContextError("The update has no base hash. Resolve the save target again.");
   }
-  const currentHash = await fingerprintLite(record);
+  const currentHash = await fingerprintContext(record);
   requireCurrentBase(record, currentHash, baseHash);
   const profileText = normalizeProfile(profile);
   const useWhen = normalizeRoutingDescription(routingDescription);
@@ -538,18 +596,18 @@ async function prepareCapturedLiteUpdate({
   };
 }
 
-export async function previewCapturedLiteUpdate(capture) {
-  return prepareCapturedLiteUpdate(capture);
+export async function previewCapturedContextUpdate(capture) {
+  return prepareCapturedContextUpdate(capture);
 }
 
 async function acquireUpdateLock(record) {
-  const lock = path.join(liteHome(), `.update-${slugify(record.id)}.lock`);
+  const lock = path.join(contextHome(), `.update-${slugify(record.id)}.lock`);
   try {
     await mkdir(lock);
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
     if (Date.now() - (await stat(lock)).mtimeMs <= UPDATE_LOCK_STALE_MS) {
-      throw new LiteContextError(
+      throw new ContextError(
         `The "${record.name}" context is already being updated. Try again in a moment.`
       );
     }
@@ -563,7 +621,7 @@ async function acquireUpdateLock(record) {
 
 // Kept separate so the rollback path is directly testable. The backup lives
 // beside both directories, making every rename stay on one filesystem.
-export async function replaceLiteDirectory(directory, staging, backup) {
+export async function replaceContextDirectory(directory, staging, backup) {
   await rename(directory, backup);
   try {
     await rename(staging, directory);
@@ -577,20 +635,20 @@ export async function replaceLiteDirectory(directory, staging, backup) {
 // Replaces only plugin-owned state. For a saved context that is its complete
 // knowledge folder; for a `/create` context it is a bundle-local conversation
 // supplement. The linked folder is read-only throughout this operation.
-export async function updateCapturedLite(capture) {
-  const prepared = await prepareCapturedLiteUpdate(capture);
+export async function updateCapturedContext(capture) {
+  const prepared = await prepareCapturedContextUpdate(capture);
   if (!prepared.changed) {
-    throw new LiteContextError(
+    throw new ContextError(
       `The capture does not change the "${prepared.record.name}" context.`
     );
   }
 
   const release = await acquireUpdateLock(prepared.record);
   const suffix = randomBytes(6).toString("hex");
-  const staging = path.join(liteHome(), `.staging-update-${suffix}`);
-  const backup = path.join(liteHome(), `.backup-update-${suffix}`);
+  const staging = path.join(contextHome(), `.staging-update-${suffix}`);
+  const backup = path.join(contextHome(), `.backup-update-${suffix}`);
   try {
-    const currentHash = await fingerprintLite(prepared.record);
+    const currentHash = await fingerprintContext(prepared.record);
     requireCurrentBase(prepared.record, currentHash, capture.baseHash);
 
     await cp(prepared.record.directory, staging, {
@@ -613,15 +671,18 @@ export async function updateCapturedLite(capture) {
     const now = new Date().toISOString();
     const manifest = {
       ...stored,
-      schema: SCHEMA,
+      schema: CONTEXT_SCHEMA,
       id: prepared.record.id,
       name: prepared.record.name,
-      kind: "lite",
+      profileFile: "profile.md",
       createdAt: prepared.record.createdAt ?? stored.createdAt ?? now,
       updatedAt: now,
       revision: prepared.record.revision + 1,
       routingDescription: prepared.useWhen,
-      updatedFrom: "pi-conversation"
+      updatedFrom:
+        typeof capture.updatedFrom === "string" && capture.updatedFrom.trim().length > 0
+          ? capture.updatedFrom.trim()
+          : "conversation"
     };
     if (prepared.record.knowledgeManaged) {
       manifest.knowledgeFolder = "knowledge";
@@ -643,11 +704,11 @@ export async function updateCapturedLite(capture) {
     // outside that protocol.
     requireCurrentBase(
       prepared.record,
-      await fingerprintLite(prepared.record),
+      await fingerprintContext(prepared.record),
       capture.baseHash
     );
 
-    await replaceLiteDirectory(prepared.record.directory, staging, backup);
+    await replaceContextDirectory(prepared.record.directory, staging, backup);
 
     return {
       record: recordFor(prepared.record.directory, manifest),
@@ -667,30 +728,32 @@ export async function updateCapturedLite(capture) {
 // A captured context is already an export bundle. Import reads only the
 // portable, generated shape and creates a fresh local id, so a teammate can
 // keep the shared folder unchanged and can rename the local copy if necessary.
-export async function importCapturedLite({ bundleFolder, name }) {
+export async function importCapturedContext({ bundleFolder, name }) {
   const supplied = (bundleFolder ?? "").trim();
   if (supplied.length === 0) {
-    throw new LiteContextError("A captured context bundle folder is required.");
+    throw new ContextError("A captured context bundle folder is required.");
   }
   const source = path.resolve(supplied);
   if (!(await directoryExists(source))) {
-    throw new LiteContextError(`No captured context bundle at ${source}.`);
+    throw new ContextError(`No captured context bundle at ${source}.`);
   }
 
   let manifest;
   try {
     manifest = JSON.parse(await readFile(path.join(source, "context.json"), "utf8"));
   } catch {
-    throw new LiteContextError(`Could not read a valid context.json from ${source}.`);
+    throw new ContextError(`Could not read a valid context.json from ${source}.`);
   }
   if (
-    manifest?.schema !== SCHEMA ||
-    manifest.kind !== "lite" ||
+    !(
+      (manifest?.schema === CONTEXT_SCHEMA && manifest.kind === undefined) ||
+      (manifest?.schema === LEGACY_SCHEMA && manifest.kind === "lite")
+    ) ||
     manifest.knowledgeManaged !== true ||
     manifest.knowledgeFolder !== "knowledge" ||
     !isConversationCapture(manifest.capturedFrom)
   ) {
-    throw new LiteContextError(
+    throw new ContextError(
       "That folder is not a portable conversation context bundle."
     );
   }
@@ -699,7 +762,7 @@ export async function importCapturedLite({ bundleFolder, name }) {
   try {
     profile = await readFile(path.join(source, "profile.md"), "utf8");
   } catch {
-    throw new LiteContextError("The captured context bundle has no readable profile.md.");
+    throw new ContextError("The captured context bundle has no readable profile.md.");
   }
 
   const knowledgeFolder = path.join(source, "knowledge");
@@ -707,7 +770,7 @@ export async function importCapturedLite({ bundleFolder, name }) {
     limit: MAX_CAPTURE_FILES + 1
   });
   if (truncated || files.length > MAX_CAPTURE_FILES) {
-    throw new LiteContextError(
+    throw new ContextError(
       `The captured context bundle has more than ${MAX_CAPTURE_FILES} knowledge files.`
     );
   }
@@ -719,7 +782,7 @@ export async function importCapturedLite({ bundleFolder, name }) {
     });
   }
 
-  return createCapturedLite({
+  return createCapturedContext({
     name: typeof name === "string" && name.trim().length > 0 ? name : manifest.name,
     profile,
     routingDescription: manifest.routingDescription,
@@ -738,7 +801,7 @@ function isInside(parent, child) {
 // deterministically through the command line.
 export function requireUnchangedExport(record, before, after) {
   if (before !== after) {
-    throw new LiteContextError(
+    throw new ContextError(
       `The "${record.name}" context changed while it was being exported. Run the export again.`
     );
   }
@@ -747,50 +810,50 @@ export function requireUnchangedExport(record, before, after) {
 // Copies a saved context's bundle to a folder the user picks. A conversation
 // context is already portable — relative paths, generated knowledge inside the
 // bundle — so export is a copy rather than a conversion, and what lands is
-// exactly the shape `importCapturedLite` reads back.
+// exactly the shape `importCapturedContext` reads back.
 //
 // A `/create` context is refused instead of half-exported. Its knowledge is a
 // folder this plugin references but does not own, so carrying it would mean
 // copying files the user never handed over, and leaving it behind would ship a
 // bundle whose knowledge is silently missing on the other machine.
-export async function exportLite({ record, destination, force = false, routingDescription }) {
+export async function exportContext({ record, destination, force = false, routingDescription }) {
   if (!record) {
-    throw new LiteContextError("No lite context was selected for export.");
+    throw new ContextError("No context was selected for export.");
   }
   if (!record.knowledgeManaged) {
-    throw new LiteContextError(
+    throw new ContextError(
       `"${record.name}" links a knowledge folder this plugin does not own ` +
         `(${record.knowledgeFolder}), so it cannot be exported as a self-contained ` +
         "bundle. Copy that folder to the other machine yourself and re-create the " +
-        "context there with `/neatcontext-create`. Contexts saved from a conversation " +
+        "context there with `/neatcontext:create`. Contexts saved from a conversation " +
         "own their knowledge and export in full."
     );
   }
 
   const supplied = (destination ?? "").trim();
   if (supplied.length === 0) {
-    throw new LiteContextError("An export destination folder is required.");
+    throw new ContextError("An export destination folder is required.");
   }
   const parent = path.resolve(supplied);
   if (isInside(record.directory, parent)) {
-    throw new LiteContextError(
+    throw new ContextError(
       "The export destination is inside the context being exported. Pick a folder outside it."
     );
   }
-  // An exported copy under the lite home would be read back by `listLite` as a
+  // An exported copy under the Context home would be read back as a
   // second context carrying the same id, which makes `use` and `delete`
   // ambiguous. Export writes bundles for elsewhere; import is what brings one in.
-  if (isInside(liteHome(), parent)) {
-    throw new LiteContextError(
+  if (isInside(contextHome(), parent) || isInside(legacyContextHome(), parent)) {
+    throw new ContextError(
       "The export destination is inside NeatContext's own context storage. Pick a folder " +
-        "outside it — use `/neatcontext-import` to bring a bundle back in."
+        "outside it — use `/neatcontext:import` to bring a bundle back in."
     );
   }
 
   const target = path.join(parent, path.basename(record.directory));
   const replacing = await directoryExists(target);
   if (replacing && !force) {
-    throw new LiteContextError(
+    throw new ContextError(
       `${target} already exists. Re-run the export with --force to replace it.`
     );
   }
@@ -803,25 +866,24 @@ export async function exportLite({ record, destination, force = false, routingDe
   const backup = path.join(parent, `.neatcontext-export-backup-${suffix}`);
   try {
     await mkdir(parent, { recursive: true });
-    const before = await fingerprintLite(record);
+    const before = await fingerprintContext(record);
     await cp(record.directory, staging, { recursive: true, errorOnExist: true, force: false });
 
     // The lock stops a concurrent save; this catches a hand edit made while the
     // copy was running, which would otherwise publish a torn bundle.
-    requireUnchangedExport(record, before, await fingerprintLite(record));
+    requireUnchangedExport(record, before, await fingerprintContext(record));
 
     const useWhen = (routingDescription ?? "").trim();
-    if (useWhen.length > 0) {
-      const manifestPath = path.join(staging, "context.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-      if (manifest.routingDescription !== useWhen) {
-        manifest.routingDescription = useWhen;
-        await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-      }
-    }
+    const manifestPath = path.join(staging, "context.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.schema = CONTEXT_SCHEMA;
+    manifest.profileFile = "profile.md";
+    delete manifest.kind;
+    if (useWhen.length > 0) manifest.routingDescription = useWhen;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
     if (replacing) {
-      await replaceLiteDirectory(target, staging, backup);
+      await replaceContextDirectory(target, staging, backup);
     } else {
       await rename(staging, target);
     }
@@ -837,8 +899,8 @@ export async function exportLite({ record, destination, force = false, routingDe
 // Removes the context directory. A `/create` context only points at the user's
 // knowledge folder, so that folder is left alone. A `/save` context owns its
 // generated knowledge inside this directory, so it is removed with the bundle.
-export async function deleteLite(id) {
-  const record = await readLite(id);
+export async function deleteContext(id) {
+  const record = await readContext(id);
   if (!record) {
     return null;
   }
@@ -846,7 +908,7 @@ export async function deleteLite(id) {
   return record;
 }
 
-// A shallow, capped listing of the knowledge folder. Lite has no index and no
+// A shallow, capped listing of the knowledge folder. The plugin has no index or
 // retrieval engine: this listing is what turns the client's own file tools from
 // blind globbing into targeted reads.
 export async function listKnowledgeFiles(folder, { limit = MAX_LISTED_FILES } = {}) {
@@ -898,19 +960,18 @@ function pathEntry(target) {
   return target;
 }
 
-export const LITE_MISSING_MESSAGE =
-  "The lite context this session was using no longer exists on disk. Run " +
-  "`/neatcontext-list` to pick another one, or `/neatcontext-create` to make a new one.";
+export const CONTEXT_MISSING_MESSAGE =
+  "The context this session was using no longer exists on disk. Choose another context " +
+  "or create a new one.";
 
-// The `get_context` payload. Mirrors the desktop's contract — pointers to files
-// the client reads itself, never compiled knowledge content — so what a user
-// learns here transfers directly to a standard context.
-export async function renderLiteContext(record) {
+// The `get_context` payload contains pointers to files that the client reads
+// itself; knowledge content is never copied into the response.
+export async function renderContext(record) {
   const name = escapeMarkdown(record.name);
   const lines = [
-    `# NeatContext Lite — connected context: ${name}`,
+    `# NeatContext — connected context: ${name}`,
     "",
-    `You are answering with the "${name}" lite context. Ground every answer in the ` +
+    `You are answering with the "${name}" context. Ground every answer in the ` +
       "domain profile and the local knowledge folder below. When those sources do not " +
       "cover the question, say so instead of guessing.",
     "",
@@ -976,17 +1037,11 @@ export async function renderLiteContext(record) {
     '- Cite the exact file path when you rely on a source; never shorten a path with "...".'
   );
   lines.push("- Prefer these local sources over general knowledge for anything domain-specific.");
-  lines.push(
-    "- This is a lite context: one profile, local knowledge, and no extension tools. " +
-      "There is no other NeatContext evidence to fetch on this connection."
-  );
+  lines.push("- This context provides one profile and local knowledge.");
   // Session instructions are fixed at the handshake, so a session that started
-  // on a standard context and switched to this one is still carrying NeatContext's
-  // incident framing. This is the only place left that can speak, so it says so.
   lines.push(
-    "- This is not an incident context unless the profile above says so. Any " +
-      "incident-response contract described at connection does not apply here: the " +
-      "domain profile defines the behavior and the shape of the answer."
+    "- This is not an incident context unless the profile above says so. The domain " +
+      "profile defines the behavior and the shape of the answer."
   );
 
   return lines.join("\n");

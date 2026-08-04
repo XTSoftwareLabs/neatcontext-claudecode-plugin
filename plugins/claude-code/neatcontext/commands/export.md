@@ -1,17 +1,17 @@
 ---
 description: Export a saved context as a bundle folder you can share
-argument-hint: "[lite context name] [destination folder]"
+argument-hint: "[context name] [destination folder]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
-Export a lite context saved from a conversation into a self-contained bundle
+Export a context saved from a conversation into a self-contained bundle
 folder, so it can be copied to another machine or handed to a teammate and
 brought back in with `/neatcontext:import`.
 
-Your lite contexts:
+Your contexts:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list --lite`
+!`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list`
 
 The user asked to export: $ARGUMENTS
 

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { closeSession, startFakeCompanion } from "./fake-companion.mjs";
+import { closeSession } from "./process-helpers.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "..");
@@ -65,6 +65,35 @@ function runNode(script, args = [], { env = {} } = {}) {
     child.once("error", reject);
     child.once("close", (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+async function localHome(prefix) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const knowledge = path.join(directory, "knowledge");
+  await mkdir(knowledge, { recursive: true });
+  await writeFile(path.join(knowledge, "runbook.md"), "# Runbook\n");
+  return { directory, knowledge, env: { NEATCONTEXT_HOME: directory } };
+}
+
+async function createLocalContext(home, sessionId, name = "payment team") {
+  const profile = path.join(home.directory, "profile.md");
+  await writeFile(profile, `# ${name}\n\n## Purpose\nPayment support.\n`);
+  const result = await runNode(
+    cli,
+    [
+      "--session-id",
+      sessionId,
+      "create",
+      "--name",
+      name,
+      "--knowledge",
+      home.knowledge,
+      "--profile-from",
+      profile
+    ],
+    { env: home.env }
+  );
+  assert.match(result.stdout, new RegExp(`Created the "${name}" context`));
 }
 
 function rpcSession(env) {
@@ -287,9 +316,9 @@ test("Kimi commands and Skills are complete, session-aware, and host-native", as
 });
 
 test("Kimi CLI requires a safe session id and isolates routing and selection", async (t) => {
-  const companion = await startFakeCompanion();
-  t.after(() => companion.stop());
-  const env = { NEATCONTEXT_COMPANION_FILE: companion.discoveryFile };
+  const home = await localHome("neatcontext-kimi-cli-");
+  t.after(() => rm(home.directory, { recursive: true, force: true }));
+  const env = home.env;
 
   const missing = await runNode(cli, ["mode"], { env });
   assert.equal(missing.code, 0);
@@ -306,6 +335,8 @@ test("Kimi CLI requires a safe session id and isolates routing and selection", a
   const currentB = await runNode(cli, ["--session-id", "kimi-session-b", "mode"], { env });
   assert.match(currentB.stdout, /ask \(the default\)/);
 
+  await createLocalContext(home, "kimi-session-a");
+
   const connectedA = await runNode(
     cli,
     ["--session-id", "kimi-session-a", "use", "payment team"],
@@ -317,20 +348,19 @@ test("Kimi CLI requires a safe session id and isolates routing and selection", a
   const statusB = await runNode(cli, ["--session-id", "kimi-session-b", "status"], { env });
   assert.match(statusB.stdout, /No context is connected yet/);
 
-  const sessionFiles = await readdir(path.join(companion.directory, "plugin-sessions"));
+  const sessionFiles = await readdir(path.join(home.directory, "plugin-sessions"));
   assert.deepEqual(sessionFiles, ["kimi-session-a.json"]);
-  assert.equal(companion.state.bySession.get("kimi-session-a")?.contextName, "payment team");
-  assert.equal(companion.state.bySession.has("kimi-session-b"), false);
 });
 
 test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t) => {
-  const companion = await startFakeCompanion();
+  const home = await localHome("neatcontext-kimi-mcp-");
   const sessions = [];
   t.after(async () => {
     await Promise.all(sessions.map((session) => session.close()));
-    await companion.stop();
+    await rm(home.directory, { recursive: true, force: true });
   });
-  const env = { NEATCONTEXT_COMPANION_FILE: companion.discoveryFile };
+  const env = home.env;
+  await createLocalContext(home, "kimi-mcp-a");
   const selected = await runNode(
     cli,
     ["--session-id", "kimi-mcp-a", "use", "payment team"],
@@ -343,7 +373,7 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
   sessions.push(first, second);
 
   const initialized = await first.call(initialize(1));
-  assert.equal(initialized.result.serverInfo.name, "neatcontext-backend");
+  assert.equal(initialized.result.serverInfo.name, "neatcontext");
   assert.match(initialized.result.instructions, /has not yet bound/);
 
   const unboundTools = await first.call({
@@ -388,13 +418,12 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
   });
   const boundNames = boundTools.result.tools.map((tool) => tool.name).sort();
   assert.deepEqual(boundNames, [
-    "demo_ctx_payments",
     "get_context",
     "preview_context",
     "use_context"
   ]);
   const grounded = await first.call(toolCall(9, "get_context"));
-  assert.match(grounded.result.content[0].text, /Connected context: payment team/);
+  assert.match(grounded.result.content[0].text, /connected context: payment team/i);
 
   await second.call(initialize(10));
   const boundSecond = await second.call(
@@ -402,9 +431,7 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
   );
   assert.match(boundSecond.result.content[0].text, /No NeatContext context is selected/);
   const ungrounded = await second.call(toolCall(12, "get_context"));
-  assert.match(ungrounded.result.content[0].text, /No NeatContext Context is selected/);
+  assert.match(ungrounded.result.content[0].text, /No NeatContext Context is connected/);
   assert.doesNotMatch(ungrounded.result.content[0].text, /Connected context: payment team/);
 
-  assert.equal(companion.state.bySession.get("kimi-mcp-a")?.contextName, "payment team");
-  assert.equal(companion.state.bySession.has("kimi-mcp-b"), false);
 });

@@ -46,7 +46,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "node --check extensions/neatcontext.js && node --check src/pi/runtime.mjs && node --check src/pi/session.mjs && node --check src/core/companion-client.mjs && node --check src/core/conversation-evidence.mjs && node --check src/core/lite-context.mjs && node --check src/core/routing.mjs && node --check src/core/selection.mjs && node --check src/core/session.mjs",
+    "check": "node --check extensions/neatcontext.js && node --check src/pi/runtime.mjs && node --check src/pi/session.mjs && node --check src/core/context-store.mjs && node --check src/core/local-state.mjs && node --check src/core/conversation-evidence.mjs && node --check src/core/routing.mjs && node --check src/core/selection.mjs && node --check src/core/session.mjs && node --check src/core/storage-home.mjs",
     "test": "node --test"
   }
 }

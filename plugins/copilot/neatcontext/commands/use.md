@@ -5,8 +5,8 @@ disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---
 
-Connect a lite context so the rest of this session is grounded in it. Lite
-contexts are stored locally by this plugin — created here with
+Connect a Context so the rest of this session is grounded in it. Contexts are
+stored locally by this plugin — created here with
 `/neatcontext:create` or saved from a conversation with `/neatcontext:save`.
 
 The user supplied:
@@ -32,8 +32,8 @@ Based on that output:
 
 - If it confirms a context was connected, tell the user which context is now
   active and stop there — do not run a second command or tool call to verify it.
-  From now on, call the `get_context` tool to ground answers; a lite context
-  serves only `get_context`. Do not restate the context contents.
+  From now on, call the `get_context` tool to ground answers. Do not restate the
+  context contents.
 - **If it also says the context has no routing description yet**, this is the
   one moment its profile is readable, so derive one now: call `get_context`,
   read what it returns, and write a single line under 200 characters naming the

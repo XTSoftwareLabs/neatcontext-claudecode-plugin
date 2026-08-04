@@ -1,19 +1,19 @@
 // The GitHub Copilot plugin is a thin fork of the claude-code plugin: src/core
-// reused verbatim, commands ported, and a lite-only host adapter in src/copilot.
+// reused verbatim, commands ported, and a local Context adapter in src/copilot.
 // These tests pin the fork's contracts: what must stay byte-identical to
-// claude-code, what must never leave the machine (no companion HTTP), how
+// claude-code, how
 // sessions scope to workspaces on hosts that expose no session identity, and
 // that nothing here runs on its own.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { closeSession, startFakeCompanion } from "./fake-companion.mjs";
+import { closeSession } from "./process-helpers.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "..");
@@ -184,13 +184,12 @@ function toolCall(id, name, args = {}) {
   };
 }
 
-// One isolated NeatContext home per test: lite store, selections, and routing
-// state all root at the discovery file's directory.
+// One isolated NeatContext home per test.
 async function isolatedHome(prefix) {
   const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
   return {
     directory,
-    env: { NEATCONTEXT_COMPANION_FILE: path.join(directory, "companion.json") }
+    env: { NEATCONTEXT_HOME: directory }
   };
 }
 
@@ -203,7 +202,7 @@ async function knowledgeFolder(home, files = { "runbook.md": "# Runbook\n" }) {
   return folder;
 }
 
-async function createLiteContext(home, name, { sessionId = "copilot-test" } = {}) {
+async function createContext(home, name, { sessionId = "copilot-test" } = {}) {
   const folder = await knowledgeFolder(home);
   const profileFile = path.join(home.directory, `${name.replace(/\W+/g, "-")}-profile.md`);
   await writeFile(
@@ -226,7 +225,7 @@ async function createLiteContext(home, name, { sessionId = "copilot-test" } = {}
     ],
     { env: { ...home.env, NEATCONTEXT_SESSION_ID: sessionId } }
   );
-  assert.match(result.stdout, new RegExp(`Created the "${name}" lite context`));
+  assert.match(result.stdout, new RegExp(`Created the "${name}" context`));
   return result;
 }
 
@@ -267,10 +266,8 @@ test("Copilot plugin manifest is complete, version-aligned, and listed in the ma
   assert.ok((await stat(path.join(pluginRoot, "commands"))).isDirectory());
 
   // The Claude marketplace lists the Claude plugin and nothing else. Copilot
-  // rejects that file wholesale anyway (git-subdir sources), and an entry for
-  // this plugin there would only offer a Claude Code user the lite-only Copilot
-  // build — while forcing a suffixed entry name to avoid colliding with the
-  // Claude one. That suffix is what leaked into the command namespace.
+  // uses its own format and an entry here would force a suffixed name that
+  // leaks into the command namespace.
   assert.deepEqual(
     marketplace.plugins.map((candidate) => candidate.name),
     ["neatcontext"],
@@ -363,7 +360,7 @@ test("Copilot manifest sits where the awesome-copilot intake looks for it", asyn
 // show up here.
 test("Copilot plugin reuses the claude-code core verbatim", async () => {
   const shared = await readdir(path.join(pluginRoot, "src", "core"));
-  assert.ok(shared.includes("lite-context.mjs"), "the copied core must include lite-context");
+  assert.ok(shared.includes("context-store.mjs"), "the copied core must include context-store");
   assert.ok(shared.includes("routing.mjs"), "the copied core must include routing");
 
   for (const name of shared) {
@@ -376,7 +373,7 @@ test("Copilot plugin reuses the claude-code core verbatim", async () => {
   }
 });
 
-test("Copilot commands are complete, lite-only, and pre-approve only the bundled CLI", async () => {
+test("Copilot commands are complete, local-only, and pre-approve only the bundled CLI", async () => {
   const actual = (await readdir(path.join(pluginRoot, "commands")))
     .filter((name) => name.endsWith(".md"))
     .map((name) => name.slice(0, -3))
@@ -414,14 +411,8 @@ test("Copilot commands are complete, lite-only, and pre-approve only the bundled
       /CLAUDE_PROJECT_DIR|CLAUDE_SESSION_ID/,
       `${file} must not rely on Claude Code env expansions`
     );
-    // Lite-only: no command may send the user to the desktop app or promise
-    // standard contexts this plugin cannot serve.
+    // Context selection and management stay within the installed plugin.
     assert.doesNotMatch(markdown, /desktop app/i, `${file} must not reference the desktop app`);
-    assert.doesNotMatch(
-      markdown,
-      /standard context/i,
-      `${file} must not promise standard contexts`
-    );
   }
 
   for (const name of USER_ONLY_COMMANDS) {
@@ -435,27 +426,22 @@ test("Copilot commands are complete, lite-only, and pre-approve only the bundled
   }
 });
 
-test("Copilot CLI serves lite contexts without ever contacting the companion", async (t) => {
-  // A live companion with contexts to offer is the strongest temptation the
-  // lite-only variant can face; the assertion is that it never even knocks.
-  const companion = await startFakeCompanion();
-  t.after(() => companion.stop());
-  const home = { directory: companion.directory, env: { NEATCONTEXT_COMPANION_FILE: companion.discoveryFile } };
+test("Copilot CLI serves local Contexts", async (t) => {
+  const home = await isolatedHome("neatcontext-copilot-cli-");
+  t.after(() => rm(home.directory, { recursive: true, force: true }));
   const env = { ...home.env, NEATCONTEXT_SESSION_ID: "copilot-cli-a" };
 
-  await createLiteContext(home, "copilot docs", { sessionId: "copilot-cli-a" });
+  await createContext(home, "copilot docs", { sessionId: "copilot-cli-a" });
 
   const list = await runNode(cli, ["list"], { env });
-  assert.match(list.stdout, /Lite contexts:/);
+  assert.match(list.stdout, /Contexts:/);
   assert.match(list.stdout, /copilot docs/);
-  assert.doesNotMatch(list.stdout, /Standard contexts:/);
-  assert.doesNotMatch(list.stdout, /payment team/);
 
   const use = await runNode(cli, ["use", "copilot docs"], { env });
-  assert.match(use.stdout, /Connected the "copilot docs" lite context/);
+  assert.match(use.stdout, /Connected the "copilot docs" context/);
 
   const status = await runNode(cli, ["status"], { env });
-  assert.match(status.stdout, /Connected context: copilot docs \(lite\)/);
+  assert.match(status.stdout, /Connected context: copilot docs/);
   assert.match(status.stdout, /Context routing: ask/);
 
   const saveTarget = await runNode(cli, ["save-target"], { env });
@@ -470,8 +456,6 @@ test("Copilot CLI serves lite contexts without ever contacting the companion", a
   });
   assert.match(other.stdout, /No context is connected yet/);
 
-  assert.equal(companion.state.sessionHeaders.length, 0, "no authorized companion request");
-  assert.equal(companion.state.puts, 0, "no companion connection attempt");
 });
 
 test("Copilot sessions scope to the workspace when no session id is provided", async (t) => {
@@ -482,18 +466,18 @@ test("Copilot sessions scope to the workspace when no session id is provided", a
   // workspace digest even when the test runner's own environment carries ids.
   const wsEnv = { ...home.env, NEATCONTEXT_SESSION_ID: "" };
 
-  await createLiteContext(home, "workspace scoped");
+  await createContext(home, "workspace scoped");
 
   const connect = await runNode(cli, ["use", "workspace scoped"], {
     env: wsEnv,
     cwd: workspaceA
   });
-  assert.match(connect.stdout, /Connected the "workspace scoped" lite context/);
+  assert.match(connect.stdout, /Connected the "workspace scoped" context/);
 
   // Same workspace, new process: the selection must be found again — this is
   // the CLI-to-MCP-server agreement the workspace digest exists for.
   const sameWorkspace = await runNode(cli, ["status"], { env: wsEnv, cwd: workspaceA });
-  assert.match(sameWorkspace.stdout, /Connected context: workspace scoped \(lite\)/);
+  assert.match(sameWorkspace.stdout, /Connected context: workspace scoped/);
 
   const otherWorkspace = await runNode(cli, ["status"], { env: wsEnv, cwd: workspaceB });
   assert.match(otherWorkspace.stdout, /No context is connected yet/);
@@ -504,7 +488,7 @@ test("Copilot sessions scope to the workspace when no session id is provided", a
   assert.match(modeB.stdout, /ask \(the default\)/);
 });
 
-test("Copilot MCP bridge serves lite contexts and routing locally", async (t) => {
+test("Copilot MCP bridge serves Contexts and routing locally", async (t) => {
   const home = await isolatedHome("neatcontext-copilot-mcp-");
   const sessions = [];
   t.after(async () => {
@@ -512,7 +496,7 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
   });
   const env = { ...home.env, NEATCONTEXT_SESSION_ID: "copilot-mcp-a" };
 
-  await createLiteContext(home, "bridge target", { sessionId: "copilot-mcp-a" });
+  await createContext(home, "bridge target", { sessionId: "copilot-mcp-a" });
 
   const session = rpcSession(env);
   sessions.push(session);
@@ -521,7 +505,7 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
   assert.equal(initialized.result.serverInfo.name, "neatcontext");
   assert.match(initialized.result.instructions, /get_context/);
   assert.match(initialized.result.instructions, /Connecting a context, in GitHub Copilot/);
-  assert.doesNotMatch(initialized.result.instructions, /desktop app is installed/);
+  assert.match(initialized.result.instructions, /no Desktop connection right now/);
 
   const tools = await session.call({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   assert.deepEqual(
@@ -544,7 +528,7 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
 
   const preview = await session.call(toolCall(5, "preview_context", { context: "bridge target" }));
   assert.equal(preview.result.isError, false);
-  assert.match(preview.result.content[0].text, /bridge target \(lite\)/);
+  assert.match(preview.result.content[0].text, /# bridge target/);
   assert.match(preview.result.content[0].text, /runbook\.md/);
 
   const switched = await session.call(
@@ -568,7 +552,7 @@ test("Copilot MCP bridge serves lite contexts and routing locally", async (t) =>
 
   const unknown = await session.call(toolCall(9, "demo_ctx_payments"));
   assert.equal(unknown.error.code, -32601);
-  assert.match(unknown.error.message, /lite contexts only/);
+  assert.match(unknown.error.message, /Contexts serve only get_context/);
 });
 
 // The cold start a new user actually meets: plugin installed, nothing saved

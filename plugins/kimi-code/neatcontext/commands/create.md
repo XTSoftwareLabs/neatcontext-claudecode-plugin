@@ -1,5 +1,5 @@
 ---
-description: Create a fresh NeatContext lite context from an existing knowledge folder
+description: Create a fresh NeatContext context from an existing knowledge folder
 ---
 
 Call Kimi Code's `Skill` tool and load the plugin-contributed

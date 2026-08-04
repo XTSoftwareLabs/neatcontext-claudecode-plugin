@@ -35,30 +35,25 @@ copilot plugin install neatcontext@neatcontext
 - `/neatcontext:save [name]` — save reusable work from the visible conversation.
 - `/neatcontext:use [name or number]` — connect or switch this workspace.
 - `/neatcontext:disconnect` — disconnect only this workspace.
-- `/neatcontext:list` — list the lite contexts on this machine.
+- `/neatcontext:list` — list the contexts on this machine.
 - `/neatcontext:status` — show the selection and routing mode.
-- `/neatcontext:create` — create a lite context around an existing knowledge folder.
-- `/neatcontext:import [folder]` — import a shared lite-context bundle.
+- `/neatcontext:create` — create a context around an existing knowledge folder.
+- `/neatcontext:import [folder]` — import a shared context bundle.
 - `/neatcontext:export [name] [folder]` — export a saved context as a shareable bundle.
-- `/neatcontext:delete [name or number]` — preview and delete a lite context.
+- `/neatcontext:delete [name or number]` — preview and delete a context.
 - `/neatcontext:mode [auto|ask|manual]` — show or change routing behavior.
 
 ## Scope and host differences
 
-- **Lite contexts only.** The Copilot plugin stores its contexts itself, on
-  this machine, and never talks to the NeatContext desktop app. Standard
-  contexts (desktop-app extensions, indexed retrieval) are available through
-  the Claude Code plugin instead.
+- **Local Contexts.** The plugin stores Contexts on this machine. There is no
+  NeatContext Desktop connection right now.
 - **Selections are per workspace.** Copilot does not expose a session identity
   to plugin processes, so a connected context belongs to the workspace folder:
   every Copilot session opened in that folder shares it.
-- **The save nudge needs Stop/PreCompact hook events.** VS Code's Claude-compat
-  hook runtime can deliver them; Copilot CLI has no such events, so on the CLI
-  the nudge is silently inert and saving stays user-initiated via
-  `/neatcontext:save`. The hooks are fail-silent by design: on any host
-  shortfall they do nothing rather than break the session.
+- **Saving is explicit.** Run `/neatcontext:save` when the visible conversation
+  contains durable work worth preserving.
 
-Lite contexts created here are shared with the other NeatContext plugins on
+Contexts created here are shared with the other NeatContext plugins on
 this machine — a context saved from Claude Code can be connected from Copilot,
 and vice versa.
 

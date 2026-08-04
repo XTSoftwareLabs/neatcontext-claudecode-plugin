@@ -1,12 +1,12 @@
 ---
-description: Save this conversation as a new or existing reusable lite context
+description: Save this conversation as a new or existing reusable context
 argument-hint: [new or existing context name]
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Write, Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
 Save the durable work already present in this Claude Code conversation as a
-lite context. Use the model active in this session to distill it; do not call
+context. Use the model active in this session to distill it; do not call
 another model or ask the user to restate work that is already available. Never
 open, search, or read Claude's transcript files yourself. The bundled
 `neatcontext-cli.mjs evidence` command is the only permitted transcript reader;
@@ -19,11 +19,11 @@ The optional context name is:
 
 This command follows Save / Save As semantics:
 
-- With no name, update the connected lite context. If none is connected, create
+- With no name, update the connected context. If none is connected, create
   a new context with a name derived from the conversation.
-- With a name that exactly matches an existing lite context
+- With a name that exactly matches an existing context
   (case-insensitively), update it.
-- With a new name, create a new lite context.
+- With a new name, create a new context.
 
 ## Resolve the destination first
 
@@ -53,7 +53,7 @@ Follow the `Save action` from `save-target`:
 - `choose` — show the similar or duplicate names and ask whether the user means
   an exact existing context or the proposed new name. Stop until they answer.
 - `unavailable` — relay why the destination cannot be updated and ask for a new
-  lite-context name.
+  context name.
 
 Updating a named context does not connect or switch to it. When it is not the
 connected context, treat its profile as source material for this save only; do
@@ -172,7 +172,7 @@ For an update, add the exact target values printed by `save-target`:
 {
   "schema": 1,
   "name": "Exact existing context name",
-  "targetId": "lite:exact-id",
+  "targetId": "context:exact-id",
   "baseHash": "exact base hash",
   "profile": "# Exact existing context name\n\n## Purpose\n...",
   "routingDescription": "One line describing only the matching scope",

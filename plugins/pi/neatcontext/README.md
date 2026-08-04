@@ -5,7 +5,7 @@ conversations as structured, reusable context that you can use in later sessions
 or share with others.
 
 Part of [NeatContext plugins](https://github.com/XTSoftwareLabs/neatcontext-plugins),
-which also supports Claude Code, Codex, and Kimi Code.
+which also supports Claude Code, GitHub Copilot, Codex, and Kimi Code.
 
 ## Why
 
@@ -31,14 +31,15 @@ pi install npm:@xtsoftwarelabs/neatcontext-pi
 | Command | What it does |
 | --- | --- |
 | `/neatcontext-status` | What this session is grounded in, and its routing mode |
-| `/neatcontext-list` | Every context you can connect (`--lite` for lite only) |
+| `/neatcontext-list` | Every context you can connect |
 | `/neatcontext-use [name]` | Connect a context. With no name, pick from a list |
 | `/neatcontext-disconnect` | Disconnect this session's context |
 | `/neatcontext-mode [auto\|ask\|manual]` | How this session may re-ground itself (`--global` for the default) |
-| `/neatcontext-create` | Create a lite context around a knowledge folder you already have |
+| `/neatcontext-create` | Create a context around a knowledge folder you already have |
 | `/neatcontext-save [name]` | Save this conversation's durable work as a context |
 | `/neatcontext-import <folder>` | Import a shared conversation-context bundle |
-| `/neatcontext-delete <name>` | Delete a lite context |
+| `/neatcontext-export [name] --to <folder>` | Export a saved context as a shareable bundle |
+| `/neatcontext-delete <name>` | Delete a context |
 
 Each session has its own context and its own routing mode. Two pi windows can
 work on different contexts at once without disturbing each other.
@@ -58,9 +59,8 @@ an alias so the same words route correctly next time.
 
 ## Privacy
 
-The plugin stores contexts under `~/.neatcontext/` on your machine and talks to
-the NeatContext desktop app only over `127.0.0.1` if that app is installed and open. It
-sends nothing anywhere else. See
+The plugin stores contexts under `~/.neatcontext/` on your machine. There is no
+NeatContext Desktop connection right now. See
 [PRIVACY.md](https://github.com/XTSoftwareLabs/neatcontext-plugins/blob/main/PRIVACY.md).
 
 pi extensions run with full permissions. Read the source before installing —

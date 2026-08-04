@@ -18,10 +18,9 @@ const preCompactHook = path.join(plugin, "hooks", "pre-compact.mjs");
 const cli = path.join(plugin, "src", "claude", "neatcontext-cli.mjs");
 
 const home = await mkdtemp(path.join(os.tmpdir(), "e2e-no-nudge-"));
-const discovery = path.join(home, "companion.json");
 const routingFile = path.join(home, "plugin-routing.json");
 const sessionId = "e2e-session-0001";
-const env = { ...process.env, NEATCONTEXT_COMPANION_FILE: discovery, CLAUDE_CODE_SESSION_ID: sessionId };
+const env = { ...process.env, NEATCONTEXT_HOME: home, CLAUDE_CODE_SESSION_ID: sessionId };
 
 function run(script, args, { input, extraEnv = {} } = {}) {
   return new Promise((resolve, reject) => {

@@ -136,7 +136,7 @@ test("all namespaced workflows are real skills without scaffold placeholders", a
 test("Codex CLI isolates routing by CODEX_THREAD_ID", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-routing-"));
   const env = {
-    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    NEATCONTEXT_HOME: home,
     CODEX_THREAD_ID: "thread-a"
   };
 
@@ -157,7 +157,7 @@ test("Codex saves conversation provenance without touching a transcript", async 
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-save-"));
   const capturePath = path.join(home, "capture.json");
   const env = {
-    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    NEATCONTEXT_HOME: home,
     CODEX_THREAD_ID: "save-thread"
   };
   await writeFile(
@@ -182,16 +182,17 @@ test("Codex saves conversation provenance without touching a transcript", async 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Use command: \$neatcontext:use Codex smoke context/);
 
-  const liteEntries = await readdir(path.join(home, "lite"));
-  assert.equal(liteEntries.length, 1);
+  const contextEntries = await readdir(path.join(home, "contexts"));
+  assert.equal(contextEntries.length, 1);
   const manifest = JSON.parse(
-    await readFile(path.join(home, "lite", liteEntries[0], "context.json"), "utf8")
+    await readFile(path.join(home, "contexts", contextEntries[0], "context.json"), "utf8")
   );
-  assert.equal(manifest.schema, 1);
+  assert.equal(manifest.schema, 2);
+  assert.equal(manifest.kind, undefined);
   assert.equal(manifest.capturedFrom, "codex-conversation");
 
   const connected = await runNode(cli, ["use", "Codex smoke context"], { env });
-  assert.match(connected.stdout, /Connected the "Codex smoke context" lite context/);
+  assert.match(connected.stdout, /Connected the "Codex smoke context" context/);
 
   const disconnected = await runNode(cli, ["disconnect"], { env });
   assert.match(
@@ -206,7 +207,7 @@ test("SessionStart hook emits thread-scoped routing guidance", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-hook-"));
   const result = await runNode(hook, [], {
     env: {
-      NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+      NEATCONTEXT_HOME: home,
       CODEX_THREAD_ID: ""
     },
     input: JSON.stringify({
@@ -232,7 +233,7 @@ test("SessionStart hook emits thread-scoped routing guidance", async () => {
 test("MCP bridge does not advertise get_context for an empty installation", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-mcp-"));
   const rpc = rpcSession({
-    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    NEATCONTEXT_HOME: home,
     CODEX_THREAD_ID: "mcp-thread"
   });
   try {
@@ -245,7 +246,7 @@ test("MCP bridge does not advertise get_context for an empty installation", asyn
     assert.equal(initialized.result.serverInfo.name, "neatcontext");
     assert.equal(initialized.result.capabilities.tools.listChanged, true);
     assert.match(initialized.result.instructions, /Do not call get_context merely/);
-    assert.match(initialized.result.instructions, /continue normal work without NeatContext grounding/);
+    assert.match(initialized.result.instructions, /continue normal work without NeatContext grounding/i);
     assert.doesNotMatch(initialized.result.instructions, /call the get_context tool and let/);
 
     const listed = await rpc.call({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
@@ -269,7 +270,7 @@ test("selected contexts advertise one-shot grounding guidance", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-codex-selected-"));
   const capturePath = path.join(home, "capture.json");
   const env = {
-    NEATCONTEXT_COMPANION_FILE: path.join(home, "companion.json"),
+    NEATCONTEXT_HOME: home,
     CODEX_THREAD_ID: "selected-thread"
   };
   await writeFile(

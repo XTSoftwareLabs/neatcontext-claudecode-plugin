@@ -1,19 +1,19 @@
 ---
 name: neatcontext-delete
-description: Preview and permanently delete a NeatContext lite context while preserving any externally linked knowledge folder. Use only when the user explicitly invokes this skill or clearly asks to delete a lite context.
+description: Preview and permanently delete a NeatContext context while preserving any externally linked knowledge folder. Use only when the user explicitly invokes this skill or clearly asks to delete a context.
 ---
 
 # Delete context
 
 The bundled CLI path and Kimi session id below are expanded by Kimi Code at skill activation.
 
-List lite contexts first:
+List contexts first:
 
 ```text
-KIMI_PLUGIN_ROOT="${KIMI_SKILL_DIR}/../.." kimi __plugin_run_node "${KIMI_SKILL_DIR}/../../src/kimi/neatcontext-cli.mjs" -- --session-id "${KIMI_SESSION_ID}" list --lite
+KIMI_PLUGIN_ROOT="${KIMI_SKILL_DIR}/../.." kimi __plugin_run_node "${KIMI_SKILL_DIR}/../../src/kimi/neatcontext-cli.mjs" -- --session-id "${KIMI_SESSION_ID}" list
 ```
 
-If the requested name is missing or does not resolve to exactly one lite context, show the list and ask which one. Never guess. Standard contexts must be deleted in the NeatContext desktop app.
+If the requested name is missing or does not resolve to exactly one context, show the list and ask which one. Never guess.
 
 Preview the deletion without changing anything:
 
