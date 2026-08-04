@@ -3,14 +3,13 @@ description: List the NeatContext contexts you can connect
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
 
-List the available contexts — lite ones stored by the plugin first, then
-standard ones from the NeatContext desktop app.
+List the contexts stored locally by the plugin.
 
 !`node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs" list`
 
 Relay the output above verbatim — it is already the answer. Do not re-format it,
-summarize it, explain the two kinds, or expand on any `(none — ...)` note; those
+summarize it, or expand on any `(none — ...)` note; those
 lines say everything that needs saying. Then one closing line: connect one with
-`/neatcontext:use <name>`, or — only when both sections are empty — create a
-lite one with `/neatcontext:create` or save this conversation with
+`/neatcontext:use <name>`, or — only when the list is empty — create one with
+`/neatcontext:create` or save this conversation with
 `/neatcontext:save`.

@@ -1,6 +1,6 @@
 ---
 name: neatcontext-disconnect
-description: Disconnect the NeatContext lite or standard context from the current Kimi Code session. Use when the user explicitly invokes this skill or asks to disconnect, detach, clear, or stop using the connected context.
+description: Disconnect the NeatContext Context from the current Kimi Code session. Use when the user explicitly invokes this skill or asks to disconnect, detach, clear, or stop using the connected context.
 ---
 
 # Disconnect context

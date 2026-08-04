@@ -13,7 +13,7 @@ node "<plugin-root>/src/codex/neatcontext-cli.mjs" status
 
 Relay the status concisely. If none is connected, mention `$neatcontext:use`.
 
-If the CLI reports a missing lite-context file or knowledge folder, preserve that warning and its recovery guidance.
+If the CLI reports a missing context file or knowledge folder, preserve that warning and its recovery guidance.
 
 If it reports a stale routing description, offer to refresh it. Read the connected profile, derive a fresh scope-only line under 200 characters, and record it with:
 

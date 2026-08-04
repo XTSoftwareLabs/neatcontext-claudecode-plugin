@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---
 
-Import a self-contained lite context bundle previously created with
+Import a self-contained context bundle previously created with
 `/neatcontext:save`.
 
 The bundle folder supplied by the user is:

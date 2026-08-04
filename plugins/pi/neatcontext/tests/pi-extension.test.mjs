@@ -56,7 +56,7 @@ function fakeCtx(sessionId = "extension-test-session") {
 
 before(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-pi-ext-"));
-  process.env.NEATCONTEXT_COMPANION_FILE = path.join(home, "companion.json");
+  process.env.NEATCONTEXT_HOME = home;
   extension = (await import("../extensions/neatcontext.js")).default;
   api = fakeApi();
   extension(api);
@@ -75,7 +75,6 @@ describe("registration", () => {
         "get_context",
         "neatcontext_create",
         "neatcontext_save",
-        "neatcontext_tool",
         "preview_context",
         "use_context"
       ]
@@ -105,6 +104,7 @@ describe("registration", () => {
         "neatcontext-create",
         "neatcontext-delete",
         "neatcontext-disconnect",
+        "neatcontext-export",
         "neatcontext-import",
         "neatcontext-list",
         "neatcontext-mode",
@@ -170,11 +170,27 @@ describe("commands", () => {
     assert.match(api.userMessages[1], /neatcontext-create` skill/);
   });
 
-  it("passes --lite through to the list command", async () => {
+  it("lists the single Context type", async () => {
     api.messages.length = 0;
-    await api.commands.get("neatcontext-list").handler("--lite", fakeCtx());
-    assert.match(api.messages[0].content, /Lite contexts:/);
-    assert.doesNotMatch(api.messages[0].content, /Standard contexts:/);
+    await api.commands.get("neatcontext-list").handler("", fakeCtx());
+    assert.match(api.messages[0].content, /Contexts:/);
+  });
+
+  it("parses a quoted context name and destination for export", async () => {
+    const runtime = await import("../src/pi/runtime.mjs");
+    await runtime.saveContext({
+      name: "Plugin export",
+      profile: "# Plugin export\n\n## Purpose\n\nExport parsing.\n",
+      routingDescription: "pi export command parsing",
+      knowledge: [{ path: "session-summary.md", content: "# Summary\n\nExport this.\n" }]
+    });
+    const destination = path.join(home, "quoted export destination");
+    api.messages.length = 0;
+    await api.commands
+      .get("neatcontext-export")
+      .handler(`"Plugin export" --to "${destination}"`, fakeCtx());
+    assert.match(api.messages[0].content, /Exported the "Plugin export" context/);
+    assert.match(api.messages[0].content, /quoted export destination/);
   });
 
   it("routes --global to the mode command without treating it as a mode", async () => {
@@ -187,6 +203,6 @@ describe("commands", () => {
   it("does not delete without a confirmation it never got", async () => {
     api.messages.length = 0;
     await api.commands.get("neatcontext-delete").handler("nothing-by-that-name", fakeCtx());
-    assert.match(api.messages[0].content, /No single lite context matched/);
+    assert.match(api.messages[0].content, /No single context matched/);
   });
 });

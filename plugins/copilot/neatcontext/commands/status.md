@@ -9,7 +9,7 @@ Report the current connection.
 
 Relay the status above to the user, keeping it short. If no context is connected,
 mention they can connect one with `/neatcontext:use`. If it reports a problem
-with a lite context — its files or its knowledge folder gone — relay that too,
+with a context — its files or its knowledge folder gone — relay that too,
 along with what to do about it.
 
 If it says the routing description was derived from an older version of the
@@ -19,4 +19,4 @@ description the same way `/neatcontext:use` does, and record it with
 
 Keep `/neatcontext:create` and `/neatcontext:save` distinct when suggesting a
 next step: create starts a fresh context from user answers; save distills useful
-work already in the current conversation into a new or existing lite context.
+work already in the current conversation into a new or existing context.

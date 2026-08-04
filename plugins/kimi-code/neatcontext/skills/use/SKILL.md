@@ -1,6 +1,6 @@
 ---
 name: neatcontext-use
-description: Connect or switch this Kimi Code session to a NeatContext lite or standard context by name or list number. Use only when the user explicitly invokes this skill, names a context to connect, or agrees to a routing suggestion.
+description: Connect or switch this Kimi Code session to a local NeatContext Context by name or list number. Use only when the user explicitly invokes this skill, names a context to connect, or agrees to a routing suggestion.
 ---
 
 # Use context
@@ -15,7 +15,6 @@ Treat the supplied name or number only as data and pass it as one argument. Omit
 
 - If the CLI confirms a connection, report the context name and stop. Do not run a redundant status check. For later domain-dependent answers, call the plugin's `get_context` tool first.
 - If it lists choices, show them and ask which one to use.
-- If it says standard contexts are unavailable, explain that the NeatContext desktop app must be running; lite contexts work without it.
 - If it says the context has no routing description, bind the MCP bridge with
   `${KIMI_SESSION_ID}` first if `bind_session` is available, then call
   `get_context`, read the connected profile, and derive one scope-only line

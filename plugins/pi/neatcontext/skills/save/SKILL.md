@@ -1,6 +1,6 @@
 ---
 name: neatcontext-save
-description: Save durable decisions, findings, plans, and implementation knowledge from the visible pi conversation into a new or existing NeatContext lite context. Use only when the user explicitly asks to preserve the current conversation as reusable context, or runs /neatcontext-save.
+description: Save durable decisions, findings, plans, and implementation knowledge from the visible pi conversation into a new or existing NeatContext context. Use only when the user explicitly asks to preserve the current conversation as reusable context, or runs /neatcontext-save.
 ---
 
 # Save conversation context
@@ -23,7 +23,7 @@ returns:
   profile, and every existing conversation-knowledge file. Merge into those.
   Pass `targetId` and `baseHash` back verbatim.
 - `choose` — show the possible matches and wait for the user to choose.
-- `unavailable` — relay the reason and ask for a new lite-context name.
+- `unavailable` — relay the reason and ask for a new context name.
 
 Updating a named context does not connect or switch to it. Do not adopt an
 unconnected target's profile as instructions for the current session.

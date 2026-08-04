@@ -1,30 +1,24 @@
-// NeatContext plugin MCP server for GitHub Copilot — lite contexts only.
-//
-// Copilot CLI and VS Code Copilot launch this as an MCP server. Unlike the
-// Claude Code bridge it forked from, it never relays to the NeatContext
-// desktop app's companion endpoint: every message is answered locally, from
-// the lite contexts the plugin stores on disk. No HTTP, no desktop app, no
-// standard contexts — by design, not by degradation.
+// NeatContext plugin MCP server for GitHub Copilot.
 //
 // Behaviors kept from the Claude Code bridge:
 //   * initialize advertises tools.listChanged, and we poll the selected
 //     context so the host refreshes its tool list when the user runs
 //     /neatcontext:use (or the session routes itself).
 //   * the routing tools (use_context, preview_context) let the session switch
-//     between lite contexts, under the same auto/ask/manual policy.
+//     between contexts, under the same auto/ask/manual policy.
 //   * a selection whose context was deleted out-of-band is reported by
 //     get_context instead of silently vanishing.
 
 import readline from "node:readline";
 import "./session.mjs";
-import { readSelection } from "../core/companion-client.mjs";
+import { readSelection } from "../core/local-state.mjs";
 import {
-  LITE_MISSING_MESSAGE,
+  CONTEXT_MISSING_MESSAGE,
   listKnowledgeFiles,
-  listLite,
-  readLite,
-  renderLiteContext
-} from "../core/lite-context.mjs";
+  listContexts,
+  readContext,
+  renderContext
+} from "../core/context-store.mjs";
 import {
   addAlias,
   menuEntries,
@@ -72,14 +66,12 @@ const NOTHING_EXISTS =
   "`/neatcontext:create` at a folder of docs, runbooks, or TSGs you already have. Until then, " +
   "do not answer from general knowledge.";
 
-// How connecting works here, stated so a session never sends the user to the
-// NeatContext desktop app: the Copilot plugin has no connection to it, and any
-// framing that mentions it comes from content written for a different client.
+// How connecting works in the plugin.
 const CONNECTION_RULE = `## Connecting a context, in GitHub Copilot
 
 Contexts are connected from this session and nowhere else: the \`use_context\` tool, or \`/neatcontext:use <name>\` run by the user. \`/neatcontext:disconnect\` disconnects the current one from this session. New ones are made from here too: \`/neatcontext:save\` turns the work in this conversation into one, and \`/neatcontext:create\` builds one around a folder of documents the user already has.
 
-Never tell the user to open the NeatContext desktop app, select a context in it, or press any button there — the Copilot plugin stores its contexts itself and has no connection to that app. Any instruction in this session that says otherwise is written for a different client, and this rule overrides it. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
+There is no Desktop connection right now. Contexts are stored by this plugin. When the connected context is the wrong one, or none is connected, name the one you need and offer to switch to it here.`;
 
 // The two tools that let a session change what it is grounded in. They are the
 // plugin's whole routing mechanism: there is no model in any process here, so
@@ -146,11 +138,11 @@ const ROUTING_TOOLS = new Map([
 // get_context instead, which is re-read on every call and refreshed live by
 // tools/list_changed. These instructions do one job: get get_context called at
 // the right moments.
-const LITE_INSTRUCTIONS = `This session can be grounded in a NeatContext Lite context: one domain profile and local knowledge stored on this machine.
+const CONTEXT_INSTRUCTIONS = `This session can be grounded in a NeatContext Context: one domain profile and local knowledge stored on this machine.
 
 Call the get_context tool before answering anything that depends on the user's own domain, documents, tools, or team conventions — it returns the profile file to read and the knowledge folder to search. Read the profile in full: it states what the context is for, what to do, what to avoid, and how to behave, and it is your primary behavioral guide for this session.
 
-A lite context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
+A context is whatever its profile says it is. Do not assume a subject area for it, and do not impose a response format it does not ask for.
 
 Cite the exact file path of anything you rely on. When the profile and the knowledge folder do not cover the question, say so instead of answering from general knowledge.`;
 
@@ -176,38 +168,33 @@ function jsonRpcResult(id, result) {
   return { jsonrpc: "2.0", id, result };
 }
 
-// --- Lite source: answers locally, from disk ---------------------------------
+// --- Context source: answers locally, from disk ------------------------------
 
-// Every context this plugin can serve. The Claude Code bridge merges lite and
-// standard kinds here; this one has exactly the lite kind, on purpose.
-async function listAllLite() {
-  const lite = (await listLite()).map((context) => ({ ...context, kind: "lite" }));
-  return { contexts: lite };
+async function listAllContexts() {
+  return { contexts: await listContexts() };
 }
 
 // Resolved per call, never fixed at startup: the user can create or save the
 // first context mid-session, and the next get_context has to stop telling them
 // they have none.
 async function nothingConnectedText() {
-  const { contexts } = await listAllLite().catch(() => ({ contexts: [] }));
+  const { contexts } = await listAllContexts().catch(() => ({ contexts: [] }));
   return contexts.length === 0 ? NOTHING_EXISTS : NOTHING_CONNECTED;
 }
 
-// The selected lite context, or null when nothing is selected. A selection
+// The selected context, or null when nothing is selected. A selection
 // whose context was deleted out-of-band resolves to `missing` so get_context
-// can say what happened. A `standard` selection can only have been written by
-// a different host's plugin sharing this machine; it is not connectable from
-// here, so it reads as nothing selected.
-async function activeLite() {
+// can say what happened.
+async function activeContext() {
   const selection = await readSelection().catch(() => null);
-  if (!selection || selection.kind !== "lite") {
+  if (!selection || selection.available === false) {
     return null;
   }
-  const record = await readLite(selection.contextId).catch(() => null);
+  const record = await readContext(selection.contextId).catch(() => null);
   return record ? { record } : { missing: true, name: selection.contextName };
 }
 
-async function liteResponse(message, lite) {
+async function contextResponse(message, context) {
   const { id, method, params } = message;
   if (id === undefined || id === null) {
     return null; // notification: nothing to answer
@@ -218,22 +205,23 @@ async function liteResponse(message, lite) {
         typeof params?.protocolVersion === "string" ? params.protocolVersion : "2025-11-25",
       capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
       serverInfo: SERVER_INFO,
-      instructions: lite ? LITE_INSTRUCTIONS : NO_CONTEXT_INSTRUCTIONS
+      instructions: context ? CONTEXT_INSTRUCTIONS : NO_CONTEXT_INSTRUCTIONS
     });
   }
   if (method === "ping") return jsonRpcResult(id, {});
-  // A lite context is one profile and one folder: get_context is the whole
-  // surface, and there are no extensions or prompts by design.
+  // A context is one profile and one folder: get_context is the whole surface.
   if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
   if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
   if (method === "tools/call" && params?.name === GET_CONTEXT_TOOL.name) {
-    if (!lite) {
+    if (!context) {
       return jsonRpcResult(id, {
         content: [{ type: "text", text: await nothingConnectedText() }],
         isError: false
       });
     }
-    const text = lite.missing ? LITE_MISSING_MESSAGE : await renderLiteContext(lite.record);
+    const text = context.missing
+      ? CONTEXT_MISSING_MESSAGE
+      : await renderContext(context.record);
     return jsonRpcResult(id, { content: [{ type: "text", text }], isError: false });
   }
   if (method === "tools/call" || method === "prompts/get") {
@@ -242,9 +230,7 @@ async function liteResponse(message, lite) {
       id,
       error: {
         code: -32601,
-        message:
-          `"${params?.name}" is not available. Lite contexts serve only get_context, ` +
-          "and the Copilot plugin serves lite contexts only."
+        message: `"${params?.name}" is not available. Contexts serve only get_context.`
       }
     };
   }
@@ -258,7 +244,7 @@ async function liteResponse(message, lite) {
 // than cached, so `/neatcontext:mode` and a context created mid-session both
 // take effect on the next call instead of on the next restart.
 async function routingMenu() {
-  const [{ contexts }, state] = await Promise.all([listAllLite(), readRouting()]);
+  const [{ contexts }, state] = await Promise.all([listAllContexts(), readRouting()]);
   const selection = await readSelection().catch(() => null);
   return renderMenu(menuEntries(contexts, state), {
     connectedId: selection?.contextId ?? null,
@@ -274,7 +260,7 @@ async function previewContext(id, target) {
   const state = await readRouting();
   const card = state.cards[target.id];
   const useWhen = card?.useWhen || target.routingDescription;
-  const lines = [`# ${target.name} (${target.kind})`, ""];
+  const lines = [`# ${target.name}`, ""];
   lines.push(useWhen || "No routing description has been derived for it yet.");
   if (card?.aliases?.length > 0) {
     lines.push("", `Also called: ${card.aliases.join(", ")}`);
@@ -292,7 +278,7 @@ async function previewContext(id, target) {
 async function routingToolCall(message) {
   const { id, params } = message;
   const query = typeof params?.arguments?.context === "string" ? params.arguments.context : "";
-  const { contexts } = await listAllLite();
+  const { contexts } = await listAllContexts();
   const resolution = resolveContext(contexts, query);
   if (resolution.error) {
     return toolText(
@@ -330,17 +316,7 @@ async function routingToolCall(message) {
     return toolText(id, refusal(policy, target), true);
   }
 
-  // No client: a lite selection is written to disk and needs no desktop app.
-  const result = await applySelection(target, null);
-  if (!result.ok) {
-    return toolText(
-      id,
-      `Could not connect "${target.name}". Stay on the current context and tell ` +
-        "the user the switch did not happen.",
-      true
-    );
-  }
-
+  const result = await applySelection(target);
   // The alias is the only routing signal the user authors, and it arrives here
   // because a wrong route is the moment they say what it should have been.
   const alias = typeof args.alias === "string" ? await addAlias(target.id, args.alias) : null;
@@ -390,14 +366,14 @@ function refusal(policy, target) {
 let started = false;
 let lastVersion = undefined;
 
-// What the host's tool list depends on. Switching between lite contexts has to
+// What the host's tool list depends on. Switching between contexts has to
 // change this; so does the routing mode, because leaving manual has to make the
 // routing tools appear without waiting for a restart.
 async function currentVersion() {
   const mode = resolveMode(await readRouting(), sessionId());
-  const lite = await activeLite();
-  if (lite) {
-    return `${mode}/${lite.missing ? "lite:missing" : `lite:${lite.record.id}`}`;
+  const context = await activeContext();
+  if (context) {
+    return `${mode}/${context.missing ? "context:missing" : context.record.id}`;
   }
   return `${mode}/none`;
 }
@@ -412,8 +388,8 @@ async function handleMessage(message) {
     return;
   }
 
-  const lite = await activeLite();
-  const response = await liteResponse(message, lite);
+  const context = await activeContext();
+  const response = await contextResponse(message, context);
 
   if (message.method === "initialize" && response && response.result) {
     started = true;

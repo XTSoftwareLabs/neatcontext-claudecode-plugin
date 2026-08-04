@@ -1,12 +1,11 @@
 ---
-description: Create a lite NeatContext context from here, stored locally
+description: Create a local NeatContext Context around an existing knowledge folder
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*), Write
 ---
 
-Guide the user through creating a **lite context**: one domain profile, one
-knowledge folder, no extensions. It is stored locally by the plugin and needs
-no other software installed.
+Guide the user through creating a **Context**: one domain profile and one
+knowledge folder. It is stored locally by the plugin.
 
 This remains the deliberate flow for a fresh context. If the user wants to
 distill work already present in the current conversation, direct them to

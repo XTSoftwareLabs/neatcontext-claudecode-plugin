@@ -11,12 +11,8 @@
 //   * Session identity is free. `ctx.sessionManager.getSessionId()` is right
 //     there, so every selection file and routing mode isolates per pi session
 //     without the environment-variable plumbing the other hosts need.
-//   * The tool list is fixed for the session. MCP hosts add and remove tools
-//     live via `tools/list_changed` — hiding `use_context` in manual mode, and
-//     swapping a standard context's extension tools when the context changes.
-//     pi cannot, so `use_context` stays registered and refuses in manual mode,
-//     and extension tools are reached through the one `neatcontext_tool` proxy
-//     instead of being registered one-for-one.
+//   * The tool list is fixed for the session. `use_context` therefore stays
+//     registered and refuses in manual mode.
 //
 // What pi gives back is a better grounding channel: `before_agent_start` runs
 // every turn, so the instructions and routing menu are rebuilt each time rather
@@ -24,7 +20,6 @@
 
 import { bindPiSessionId } from "../src/pi/session.mjs";
 import {
-  callExtensionTool,
   commandDisconnect,
   commandList,
   commandMode,
@@ -33,7 +28,7 @@ import {
   createContext,
   deleteContext,
   describeContext,
-  EXTENSION_TOOL_NAME,
+  exportContext,
   getContext,
   importContext,
   loadState,
@@ -68,6 +63,50 @@ function report(pi, body) {
   pi.sendMessage({ customType: "neatcontext", content: body, display: true });
 }
 
+function splitCommandArguments(input) {
+  const words = [];
+  let word = "";
+  let quote = null;
+  for (const character of input) {
+    if (quote) {
+      if (character === quote) quote = null;
+      else word += character;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (word.length > 0) {
+        words.push(word);
+        word = "";
+      }
+    } else {
+      word += character;
+    }
+  }
+  if (word.length > 0) words.push(word);
+  return words;
+}
+
+function parseExportArguments(input) {
+  const words = splitCommandArguments(input);
+  const name = [];
+  let destination = "";
+  let force = false;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    if (word === "--force") {
+      force = true;
+    } else if (word === "--to") {
+      destination = words[index + 1] ?? "";
+      index += 1;
+    } else if (word.startsWith("--to=")) {
+      destination = word.slice(5);
+    } else {
+      name.push(word);
+    }
+  }
+  return { context: name.join(" "), destination, force };
+}
+
 export default function (pi) {
   // --- grounding ------------------------------------------------------------
 
@@ -83,8 +122,7 @@ export default function (pi) {
     try {
       return { systemPrompt: `${event.systemPrompt}\n\n${await sessionInstructions()}` };
     } catch {
-      // Grounding is an enhancement: a companion that times out or a corrupt
-      // routing file must never stop the turn from running.
+      // A corrupt routing file must never stop the turn from running.
       return undefined;
     }
   });
@@ -95,8 +133,8 @@ export default function (pi) {
     name: "get_context",
     label: "get context",
     description:
-      "Get the connected NeatContext Context: domain profile files to read, local knowledge " +
-      "folders to search, and the extension tools available on this connection.",
+      "Get the connected NeatContext Context: domain profile files to read and local " +
+      "knowledge folders to search.",
     promptSnippet:
       "get_context: the user's own domain knowledge — call before answering anything that " +
       "depends on their systems, documents, or team conventions.",
@@ -194,32 +232,10 @@ export default function (pi) {
   });
 
   pi.registerTool({
-    name: EXTENSION_TOOL_NAME,
-    label: "context tool",
-    description:
-      "Call an extension tool published by the connected standard NeatContext Context. " +
-      "`get_context` lists which ones exist on this connection and what they take; a lite " +
-      "context has none.",
-    parameters: {
-      type: "object",
-      properties: {
-        tool: { type: "string", description: "The extension tool name, as get_context listed it." },
-        arguments: { type: "object", description: "Arguments for that tool." }
-      },
-      required: ["tool"],
-      additionalProperties: false
-    },
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      bindFrom(ctx);
-      return text(await callExtensionTool(params ?? {}));
-    }
-  });
-
-  pi.registerTool({
     name: "neatcontext_save",
     label: "save context",
     description:
-      "Save this conversation's durable work as a NeatContext lite context. Call with only " +
+      "Save this conversation's durable work as a NeatContext context. Call with only " +
       "`name` (or nothing) first: that returns whether this creates or updates, and for an " +
       "update the existing profile and knowledge to merge into. Then call again with the " +
       "drafted profile and knowledge. Updates preview first and apply on `confirm: true`.",
@@ -271,7 +287,7 @@ export default function (pi) {
     name: "neatcontext_create",
     label: "create context",
     description:
-      "Create a NeatContext lite context around a knowledge folder the user already has. " +
+      "Create a NeatContext context around a knowledge folder the user already has. " +
       "The folder is linked read-only and never modified. Use `neatcontext_save` instead to " +
       "capture a conversation.",
     parameters: {
@@ -312,7 +328,7 @@ export default function (pi) {
         .map((context) => ({
           value: context.name,
           label: context.name,
-          description: context.kind
+          description: "Context"
         }));
     } catch {
       return null;
@@ -329,9 +345,9 @@ export default function (pi) {
 
   pi.registerCommand("neatcontext-list", {
     description: "List the contexts you can connect",
-    handler: async (args, ctx) => {
+    handler: async (_args, ctx) => {
       bindFrom(ctx);
-      report(pi, await commandList({ liteOnly: args.trim() === "--lite" }));
+      report(pi, await commandList());
     }
   });
 
@@ -352,12 +368,12 @@ export default function (pi) {
         }
         const chosen = await ctx.ui.select(
           "Connect a NeatContext context",
-          state.contexts.map((context) => `${context.name} (${context.kind})`)
+          state.contexts.map((context) => context.name)
         );
         if (chosen === undefined) {
           return;
         }
-        query = chosen.slice(0, chosen.lastIndexOf(" ("));
+        query = chosen;
       }
       report(pi, await commandUse(query));
     }
@@ -397,8 +413,22 @@ export default function (pi) {
     }
   });
 
+  pi.registerCommand("neatcontext-export", {
+    description: "Export a saved context as a shareable bundle",
+    getArgumentCompletions: contextNameCompletions,
+    handler: async (args, ctx) => {
+      bindFrom(ctx);
+      const options = parseExportArguments(args.trim());
+      if (options.destination.length === 0 && ctx.hasUI) {
+        options.destination =
+          (await ctx.ui.input("Export bundle into", "destination folder")) ?? "";
+      }
+      report(pi, await exportContext(options));
+    }
+  });
+
   pi.registerCommand("neatcontext-delete", {
-    description: "Delete a lite context",
+    description: "Delete a context",
     getArgumentCompletions: contextNameCompletions,
     handler: async (args, ctx) => {
       bindFrom(ctx);
@@ -425,11 +455,11 @@ export default function (pi) {
   // write. This is what the other hosts get from a slash command that is itself
   // a prompt; pi command handlers are code, so the prompt is sent explicitly.
   pi.registerCommand("neatcontext-create", {
-    description: "Create a lite context from a local knowledge folder",
+    description: "Create a context from a local knowledge folder",
     handler: async (args, ctx) => {
       bindFrom(ctx);
       pi.sendUserMessage(
-        "Create a NeatContext lite context. Follow the `neatcontext-create` skill: gather " +
+        "Create a NeatContext context. Follow the `neatcontext-create` skill: gather " +
           "the name and the knowledge folder from me, read enough of that folder to draft " +
           "the domain profile and a one-line routing description, show me both, and call " +
           "the `neatcontext_create` tool once I agree.\n\n" +

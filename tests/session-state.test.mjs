@@ -26,11 +26,11 @@ const pluginRoot = path.resolve(here, "..", "plugins", "claude-code", "neatconte
 const stopHook = path.join(pluginRoot, "hooks", "stop.mjs");
 const preCompactHook = path.join(pluginRoot, "hooks", "pre-compact.mjs");
 
-function runHook(hook, input, discoveryFile) {
+function runHook(hook, input, contextHome) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hook], {
       cwd: pluginRoot,
-      env: { ...process.env, NEATCONTEXT_COMPANION_FILE: discoveryFile },
+      env: { ...process.env, NEATCONTEXT_HOME: contextHome },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
@@ -50,7 +50,6 @@ async function isolatedHome() {
   const directory = await mkdtemp(path.join(os.tmpdir(), "neatcontext-session-state-"));
   return {
     directory,
-    discoveryFile: path.join(directory, "companion.json"),
     routingFile: path.join(directory, "plugin-routing.json")
   };
 }
@@ -117,7 +116,7 @@ test("the hooks record the transcript path and never say anything", async () => 
     [stopHook, { session_id: sessionId, transcript_path: transcript, stop_hook_active: false }],
     [preCompactHook, { session_id: sessionId, transcript_path: transcript, trigger: "auto" }]
   ]) {
-    const result = await runHook(hook, JSON.stringify(payload), home.discoveryFile);
+    const result = await runHook(hook, JSON.stringify(payload), home.directory);
     assert.equal(result.code, 0, `${path.basename(hook)} must exit 0`);
     assert.equal(result.stdout, "", `${path.basename(hook)} must print nothing`);
     assert.equal(result.stderr, "", `${path.basename(hook)} must warn about nothing`);
@@ -141,14 +140,14 @@ test("an unchanged transcript path does not rewrite the routing file", async () 
   const sessionId = "hook-session-b";
   const payload = JSON.stringify({ session_id: sessionId, transcript_path: transcript });
 
-  await runHook(stopHook, payload, home.discoveryFile);
+  await runHook(stopHook, payload, home.directory);
 
   // A sentinel the hook would overwrite if it wrote at all.
   const before = JSON.parse(await readFile(home.routingFile, "utf8"));
   before.sessions[sessionId].updatedAt = "1999-01-01T00:00:00.000Z";
   await writeFile(home.routingFile, `${JSON.stringify(before, null, 2)}\n`, "utf8");
 
-  await runHook(stopHook, payload, home.discoveryFile);
+  await runHook(stopHook, payload, home.directory);
   const after = JSON.parse(await readFile(home.routingFile, "utf8"));
   assert.equal(after.sessions[sessionId].updatedAt, "1999-01-01T00:00:00.000Z");
 
@@ -158,7 +157,7 @@ test("an unchanged transcript path does not rewrite the routing file", async () 
   await runHook(
     stopHook,
     JSON.stringify({ session_id: sessionId, transcript_path: moved }),
-    home.discoveryFile
+    home.directory
   );
   const moved_state = JSON.parse(await readFile(home.routingFile, "utf8"));
   assert.equal(moved_state.sessions[sessionId].save.transcriptPath, moved);
@@ -176,7 +175,7 @@ test("a hook given nothing usable stays silent and writes nothing", async () => 
     [JSON.stringify({ session_id: "hook-session-c", transcript_path: "  " }), "blank path"]
   ]) {
     for (const hook of [stopHook, preCompactHook]) {
-      const result = await runHook(hook, input, home.discoveryFile);
+      const result = await runHook(hook, input, home.directory);
       assert.equal(result.code, 0, `${path.basename(hook)} must exit 0 on ${label}`);
       assert.equal(result.stdout + result.stderr, "", `${path.basename(hook)} silent on ${label}`);
     }

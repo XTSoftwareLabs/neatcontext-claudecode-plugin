@@ -1,5 +1,5 @@
 ---
-description: Preview and delete a NeatContext lite context
+description: Preview and delete a NeatContext context
 ---
 
 Call Kimi Code's `Skill` tool and load the plugin-contributed

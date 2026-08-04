@@ -61,9 +61,9 @@ This is useful work you may want to save. Invoke the save skill:
 You: $neatcontext:save event-partition-investigation
 
 Codex:
-Lite context folder: C:\Users\alex\.neatcontext\lite\event-partition-investigation
-Profile path: C:\Users\alex\.neatcontext\lite\event-partition-investigation\profile.md
-Knowledge folder: C:\Users\alex\.neatcontext\lite\event-partition-investigation\knowledge
+Context folder: C:\Users\alex\.neatcontext\contexts\event-partition-investigation
+Profile path: C:\Users\alex\.neatcontext\contexts\event-partition-investigation\profile.md
+Knowledge folder: C:\Users\alex\.neatcontext\contexts\event-partition-investigation\knowledge
 Use command: $neatcontext:use event-partition-investigation
 ```
 
@@ -100,17 +100,17 @@ purpose. Use a `$` mention when you want to invoke a specific skill explicitly.
 Save useful work from the current conversation using familiar Save / Save As
 behavior:
 
-- With no name, update the connected lite context after confirmation. If no
-  lite context is connected, create a new one with a name Codex derives.
-- With the exact name of an existing lite context, update it after
+- With no name, update the connected context after confirmation. If no
+  context is connected, create a new one with a name Codex derives.
+- With the exact name of an existing context, update it after
   confirmation. It does not need to be connected, and saving does not switch
   the current connection.
-- With a new name, create a new lite context.
+- With a new name, create a new context.
 
 Updates merge durable new work with the context's existing profile and
 conversation knowledge. For a context created with `$neatcontext:create`, its
 linked knowledge folder remains untouched; conversation-derived additions are
-stored inside the lite-context bundle.
+stored inside the context bundle.
 
 Use this after a conversation has produced decisions, plans, troubleshooting
 results, implementation notes, or other work worth preserving and reusing
@@ -135,34 +135,34 @@ List all contexts you can connect.
 ### `$neatcontext:status`
 
 Show the context connected to the current thread and the current routing mode.
-It also reports problems such as missing lite-context files or knowledge
+It also reports problems such as missing context files or knowledge
 folders.
 
 ### `$neatcontext:create`
 
-Create a fresh lite context instead of saving the current conversation. Codex
+Create a fresh context instead of saving the current conversation. Codex
 asks what the context is for, which existing folder contains its knowledge, and
 what to call it.
 
 The knowledge folder stays where it is; the skill does not copy, move, or
 overwrite it. Later `$neatcontext:save` updates keep generated conversation
-knowledge inside the lite-context bundle.
+knowledge inside the context bundle.
 
 ### `$neatcontext:import [folder]`
 
-Import a lite-context bundle shared by someone else. Importing creates your own
+Import a context bundle shared by someone else. Importing creates your own
 local copy and leaves the shared folder unchanged.
 
 After importing, connect it with `$neatcontext:use <name>`.
 
 ### `$neatcontext:export [name] [folder]`
 
-Copy a lite context saved from a conversation into a self-contained bundle
+Copy a context saved from a conversation into a self-contained bundle
 folder, so it can be moved to another machine or handed to a teammate and
 brought in with `$neatcontext:import`. A subfolder named after the context is
 created inside the folder you give, and the context itself is unchanged.
 
-Lite contexts are shared between AI coding clients by living in one folder on
+Contexts are shared between AI coding clients by living in one folder on
 one machine, so export is what carries one beyond it.
 
 A context created with `$neatcontext:create` cannot be exported: it links a
@@ -171,12 +171,11 @@ hand over. Copy that folder across yourself and re-create the context there.
 
 ### `$neatcontext:delete [name or number]`
 
-Delete a lite context after confirmation. Standard contexts must be deleted in
-the NeatContext desktop app.
+Delete a context after confirmation.
 
 For a context created with `$neatcontext:create`, your original knowledge folder
-is left untouched. Generated conversation knowledge stored inside the lite
-context is deleted with that context.
+is left untouched. Generated conversation knowledge stored inside the context
+is deleted with it.
 
 ### `$neatcontext:mode [auto|ask|manual]`
 
@@ -193,11 +192,9 @@ Invoke `$neatcontext:mode` without an argument to show the current mode. Add
 $neatcontext:mode auto --global
 ```
 
-## Context types
+## Context contents
 
-### Lite context
-
-A lite context contains:
+A context contains:
 
 - **One domain profile** — your team's rules, terminology, constraints, and
   preferred ways of working. It guides how Codex behaves and answers.
@@ -205,25 +202,10 @@ A lite context contains:
   troubleshooting notes, session summaries, and other knowledge Codex can use.
   When the primary folder is linked from `$neatcontext:create`, saved
   conversation additions stay in the local context bundle.
-- **No extensions.**
 
 Use `$neatcontext:save` to generate one from the current conversation,
 `$neatcontext:create` to use an existing knowledge folder, or
 `$neatcontext:import` to add one shared by a teammate.
-
-### Standard context
-
-A standard context contains:
-
-- **One domain profile** — the team's rules that guide Codex's behavior.
-- **Multiple knowledge folders** — indexed collections of team documentation
-  that Codex can search for relevant information.
-- **Extensions** — connections to internal and external systems that let Codex
-  use the tools available to the context.
-
-Standard contexts are intended for enterprise-level use. Create and manage them
-in [NeatContext Desktop](https://www.neatcontext.com). The desktop app must be
-running while you use a standard context.
 
 ## License
 

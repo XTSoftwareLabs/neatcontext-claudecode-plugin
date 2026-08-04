@@ -1,4 +1,4 @@
-// Saving a conversation is the model-assisted half of lite contexts. The model
+// Saving a conversation is the model-assisted half of Contexts. The model
 // writes a small JSON spec; these tests start at that boundary and protect what
 // the plugin itself promises: validation, atomic storage, portability, reuse,
 // sharing, and ownership-aware deletion.
@@ -11,7 +11,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { closeSession } from "./fake-companion.mjs";
+import { closeSession } from "./process-helpers.mjs";
 
 const claude = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,19 +24,17 @@ const claude = path.join(
 );
 
 let home;
-let discoveryFile;
 let serial = 0;
 
 const childEnv = () => ({
   ...process.env,
   CLAUDE_CODE_SESSION_ID: "",
-  NEATCONTEXT_COMPANION_FILE: discoveryFile
+  NEATCONTEXT_HOME: home
 });
 
 before(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-save-test-"));
-  discoveryFile = path.join(home, "companion.json");
-  process.env.NEATCONTEXT_COMPANION_FILE = discoveryFile;
+  process.env.NEATCONTEXT_HOME = home;
 });
 
 after(async () => {
@@ -44,6 +42,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  await rm(path.join(home, "contexts"), { recursive: true, force: true });
   await rm(path.join(home, "lite"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-selection.json"), { force: true });
   await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
@@ -104,7 +103,7 @@ async function saveCapture(capture = validCapture(), { consume = false } = {}) {
 }
 
 function bundleFrom(output) {
-  return /Lite context folder:\s+(.+)/.exec(output)?.[1];
+  return /Context folder:\s+(.+)/.exec(output)?.[1];
 }
 
 function outputField(output, label) {
@@ -193,7 +192,7 @@ describe("saving the current conversation", () => {
     const bundle = bundleFrom(output);
 
     assert.deepEqual(output.split(/\r?\n/), [
-      `Lite context folder: ${bundle}`,
+      `Context folder: ${bundle}`,
       `Profile path: ${path.join(bundle, "profile.md")}`,
       `Knowledge folder: ${path.join(bundle, "knowledge")}`,
       "Use command: /neatcontext:use Conversation Capture"
@@ -202,6 +201,8 @@ describe("saving the current conversation", () => {
     assert.match(await cli("status"), /No context is connected yet/);
 
     const manifest = JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8"));
+    assert.equal(manifest.schema, 2);
+    assert.equal(manifest.kind, undefined);
     assert.equal(manifest.knowledgeFolder, "knowledge");
     assert.equal(manifest.knowledgeManaged, true);
     assert.equal(manifest.capturedFrom, "claude-code-conversation");
@@ -227,7 +228,7 @@ describe("saving the current conversation", () => {
     );
 
     const use = await cli("use", "Conversation Capture");
-    assert.match(use, /Connected the "Conversation Capture" lite context/);
+    assert.match(use, /Connected the "Conversation Capture" context/);
     assert.doesNotMatch(use, /no routing description yet/);
 
     const session = openSession();
@@ -274,21 +275,21 @@ describe("saving the current conversation", () => {
     const malformed = path.join(home, "malformed.json");
     await writeFile(malformed, "{not json");
     assert.match(await cli("save", "--from", malformed), /Could not read a valid conversation capture/);
-    assert.match(await cli("list", "--lite"), /Lite contexts:\s+\(none/);
+    assert.match(await cli("list"), /Contexts:\s+\(none/);
   });
 
   it("surfaces an unexpected filesystem failure and leaves no half-context", async () => {
-    await writeFile(path.join(home, "lite"), "not a directory");
+    await writeFile(path.join(home, "contexts"), "not a directory");
     const file = await writeCapture();
     const output = await cli("save", "--from", file);
     assert.match(output, /NeatContext plugin error:/);
-    assert.equal(await readFile(path.join(home, "lite"), "utf8"), "not a directory");
+    assert.equal(await readFile(path.join(home, "contexts"), "utf8"), "not a directory");
   });
 
   it("still saves when the optional local routing cache cannot be updated", async () => {
     await mkdir(path.join(home, "plugin-routing.json"));
     const { output } = await saveCapture();
-    assert.match(output, /Lite context folder:/);
+    assert.match(output, /Context folder:/);
 
     await rm(path.join(home, "plugin-routing.json"), { recursive: true, force: true });
     assert.doesNotMatch(await cli("use", "Conversation Capture"), /no routing description yet/);
@@ -348,7 +349,7 @@ describe("saving the current conversation", () => {
       const file = await writeCapture(capture);
 
       const preview = await cli("save", "--from", file);
-      assert.match(preview, /Update the "Conversation Capture" lite context/);
+      assert.match(preview, /Update the "Conversation Capture" context/);
       assert.match(preview, /1 added, 1 updated, 1 removed/);
       assert.match(preview, /Re-run this save with --yes to confirm/);
       assert.equal(
@@ -373,7 +374,7 @@ describe("saving the current conversation", () => {
       assert.ok(afterManifest.updatedAt > beforeManifest.updatedAt);
       const routing = JSON.parse(await readFile(path.join(home, "plugin-routing.json"), "utf8"));
       assert.deepEqual(routing.cards[beforeManifest.id].aliases, ["checkout recovery"]);
-      assert.match(await cli("status"), /Connected context: Conversation Capture \(lite\)/);
+      assert.match(await cli("status"), /Connected context: Conversation Capture/);
 
       const after = await session.send("tools/call", {
         name: "get_context",
@@ -466,15 +467,15 @@ describe("saving the current conversation", () => {
     assert.equal(await readFile(outputField(target, "Profile path"), "utf8"), "# Hand-edited profile\n");
   });
 
-  it("does not recreate a connected lite context that disappeared", async () => {
+  it("does not recreate a connected context that disappeared", async () => {
     const { output } = await saveCapture();
     await cli("use", "Conversation Capture");
     await rm(bundleFrom(output), { recursive: true, force: true });
 
-    assert.match(await cli("save-target"), /connected lite context .* no longer exists/s);
+    assert.match(await cli("save-target"), /connected context .* no longer exists/s);
     assert.match(
       await cli("save-target", "Conversation Capture"),
-      /lite context "Conversation Capture" no longer exists/
+      /context "Conversation Capture" no longer exists/
     );
   });
 
@@ -485,17 +486,17 @@ describe("saving the current conversation", () => {
     const file = await writeCapture(capture);
 
     assert.match(await cli("save", "--from", file), /does not change the "Conversation Capture"/);
-    const { updateCapturedLite } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { updateCapturedContext } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
-    await assert.rejects(() => updateCapturedLite(capture), /does not change/);
+    await assert.rejects(() => updateCapturedContext(capture), /does not change/);
   });
 });
 
 describe("capture validation", () => {
   it("rejects invalid identity, profile, routing, and knowledge shapes", async () => {
-    const { createCapturedLite } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { createCapturedContext } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
     const hugeProfile = "p".repeat(128 * 1024 + 1);
     const hugeFile = "x".repeat(256 * 1024 + 1);
@@ -572,13 +573,13 @@ describe("capture validation", () => {
     ];
 
     for (const [capture, expected] of cases) {
-      await assert.rejects(() => createCapturedLite(capture), expected);
+      await assert.rejects(() => createCapturedContext(capture), expected);
     }
   });
 
   it("rejects every non-portable path form before writing", async () => {
-    const { createCapturedLite } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { createCapturedContext } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
     const badPaths = [
       "",
@@ -596,7 +597,7 @@ describe("capture validation", () => {
     for (const badPath of badPaths) {
       await assert.rejects(
         () =>
-          createCapturedLite(
+          createCapturedContext(
             validCapture({ knowledge: [{ path: badPath, content: "summary" }] })
           ),
         /Invalid knowledge file path/
@@ -605,26 +606,26 @@ describe("capture validation", () => {
   });
 
   it("refuses a duplicate name", async () => {
-    const { createCapturedLite } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { createCapturedContext } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
-    await createCapturedLite(validCapture());
-    await assert.rejects(() => createCapturedLite(validCapture()), /already exists/);
+    await createCapturedContext(validCapture());
+    await assert.rejects(() => createCapturedContext(validCapture()), /already exists/);
   });
 
-  it("keeps listing an older lite manifest that omitted its knowledge path", async () => {
+  it("keeps listing a schema 1 manifest that omitted its knowledge path", async () => {
     const legacy = path.join(home, "lite", "legacy");
     await mkdir(legacy, { recursive: true });
     await writeFile(
       path.join(legacy, "context.json"),
-      JSON.stringify({ kind: "lite", id: "lite:legacy", name: "Legacy Lite" })
+      JSON.stringify({ schema: 1, kind: "lite", id: "lite:legacy", name: "Legacy Context" })
     );
-    assert.match(await cli("list", "--lite"), /Legacy Lite/);
+    assert.match(await cli("list"), /Legacy Context/);
   });
 
   it("validates update identity and limits before writing", async () => {
-    const { fingerprintLite, listLite, previewCapturedLiteUpdate } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { fingerprintContext, listContexts, previewCapturedContextUpdate } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
     const { output } = await saveCapture();
     const target = await cli("save-target", "Conversation Capture");
@@ -633,15 +634,15 @@ describe("capture validation", () => {
     });
 
     await assert.rejects(
-      () => previewCapturedLiteUpdate({ ...capture, targetId: "lite:not-there" }),
+      () => previewCapturedContextUpdate({ ...capture, targetId: "context:not-there" }),
       /no longer exists/
     );
     await assert.rejects(
-      () => previewCapturedLiteUpdate({ ...capture, name: "Wrong Context" }),
+      () => previewCapturedContextUpdate({ ...capture, name: "Wrong Context" }),
       /prepared for "Wrong Context"/
     );
     await assert.rejects(
-      () => previewCapturedLiteUpdate({ ...capture, baseHash: "" }),
+      () => previewCapturedContextUpdate({ ...capture, baseHash: "" }),
       /no base hash/
     );
 
@@ -649,44 +650,44 @@ describe("capture validation", () => {
     for (let index = 0; index < 23; index += 1) {
       await writeFile(path.join(bundle, "knowledge", `extra-${index}.md`), "extra");
     }
-    const oversized = (await listLite())[0];
-    await assert.rejects(() => fingerprintLite(oversized), /too many generated/);
+    const oversized = (await listContexts())[0];
+    await assert.rejects(() => fingerprintContext(oversized), /too many generated/);
   });
 
   it("serializes concurrent updates and rolls a failed directory swap back", async () => {
     const {
-      fingerprintLite,
-      listLite,
-      replaceLiteDirectory,
-      updateCapturedLite
-    } = await import("../plugins/claude-code/neatcontext/src/core/lite-context.mjs");
+      fingerprintContext,
+      listContexts,
+      replaceContextDirectory,
+      updateCapturedContext
+    } = await import("../plugins/claude-code/neatcontext/src/core/context-store.mjs");
     await saveCapture();
-    const record = (await listLite())[0];
+    const record = (await listContexts())[0];
     const capture = validCapture({
       targetId: record.id,
-      baseHash: await fingerprintLite(record),
+      baseHash: await fingerprintContext(record),
       knowledge: [{ path: "session-summary.md", content: "# Session summary\n\nConcurrent." }]
     });
     const results = await Promise.allSettled([
-      updateCapturedLite(capture),
-      updateCapturedLite(capture)
+      updateCapturedContext(capture),
+      updateCapturedContext(capture)
     ]);
     assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
     const rejected = results.find((result) => result.status === "rejected");
     assert.match(rejected.reason.message, /already being updated|changed while/);
 
-    const latest = (await listLite())[0];
+    const latest = (await listContexts())[0];
     const staleLock = path.join(
       home,
-      "lite",
+      "contexts",
       `.update-${latest.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.lock`
     );
     await mkdir(staleLock);
     await utimes(staleLock, new Date(0), new Date(0));
-    await updateCapturedLite(
+    await updateCapturedContext(
       validCapture({
         targetId: latest.id,
-        baseHash: await fingerprintLite(latest),
+        baseHash: await fingerprintContext(latest),
         knowledge: [
           { path: "session-summary.md", content: "# Session summary\n\nRecovered stale lock." }
         ]
@@ -698,7 +699,7 @@ describe("capture validation", () => {
     const backup = path.join(home, "swap-backup");
     await mkdir(current);
     await writeFile(path.join(current, "marker.txt"), "original");
-    await assert.rejects(() => replaceLiteDirectory(current, missingStaging, backup));
+    await assert.rejects(() => replaceContextDirectory(current, missingStaging, backup));
     assert.equal(await readFile(path.join(current, "marker.txt"), "utf8"), "original");
   });
 });
@@ -798,14 +799,14 @@ describe("sharing a captured context", () => {
     const { output } = await saveCapture();
     const shared = path.join(home, "shared-for-failure");
     await cp(bundleFrom(output), shared, { recursive: true });
-    await rm(path.join(home, "lite"), { recursive: true, force: true });
-    await writeFile(path.join(home, "lite"), "not a directory");
+    await rm(path.join(home, "contexts"), { recursive: true, force: true });
+    await writeFile(path.join(home, "contexts"), "not a directory");
 
     assert.match(await cli("import", "--from", shared), /NeatContext plugin error:/);
   });
 });
 
-// Export is the only mechanism that crosses the machine boundary: lite contexts
+// Export is the only mechanism that crosses the machine boundary: contexts
 // are shared between hosts by living in one folder on one machine, and nothing
 // else carries them further. So what these protect is that the bundle it writes
 // is exactly what import reads back, and that a context whose knowledge the
@@ -887,7 +888,7 @@ describe("exporting a captured context", () => {
       "export",
       "Conversation Capture",
       "--to",
-      path.join(home, "lite", "nested")
+      path.join(home, "contexts", "nested")
     );
     assert.match(output, /inside NeatContext's own context storage/);
     assert.match(output, /`\/neatcontext:import`/);
@@ -918,7 +919,7 @@ describe("exporting a captured context", () => {
     await saveCapture();
     const destination = path.join(home, "exports-connected");
 
-    assert.match(await cli("export", "--to", destination), /Which lite context should I export\?/);
+    assert.match(await cli("export", "--to", destination), /Which context should I export\?/);
 
     await cli("use", "Conversation Capture");
     assert.match(
@@ -932,7 +933,7 @@ describe("exporting a captured context", () => {
     assert.match(await cli("export"), /Pass the destination folder with --to/);
     assert.match(
       await cli("export", "Not A Context", "--to", path.join(home, "exports-missing")),
-      /No single lite context matched "Not A Context"/
+      /No single context matched "Not A Context"/
     );
     assert.match(
       await cli("export", "Conversation Capture", "--to", path.join(bundleFrom(output), "inner")),
@@ -952,16 +953,16 @@ describe("exporting a captured context", () => {
   });
 
   it("guards the arguments and the copy that the command line cannot reach", async () => {
-    const { exportLite, requireUnchangedExport, LiteContextError } = await import(
-      "../plugins/claude-code/neatcontext/src/core/lite-context.mjs"
+    const { exportContext, requireUnchangedExport, ContextError } = await import(
+      "../plugins/claude-code/neatcontext/src/core/context-store.mjs"
     );
 
     await assert.rejects(
-      () => exportLite({ destination: path.join(home, "exports-none") }),
-      /No lite context was selected for export/
+      () => exportContext({ destination: path.join(home, "exports-none") }),
+      /No context was selected for export/
     );
     await assert.rejects(
-      () => exportLite({ record: { name: "X", knowledgeManaged: true }, destination: "  " }),
+      () => exportContext({ record: { name: "X", knowledgeManaged: true }, destination: "  " }),
       /export destination folder is required/
     );
 
@@ -970,7 +971,7 @@ describe("exporting a captured context", () => {
     assert.throws(
       () => requireUnchangedExport(record, "before", "after"),
       (error) =>
-        error instanceof LiteContextError &&
+        error instanceof ContextError &&
         /changed while it was being exported\. Run the export again/.test(error.message)
     );
   });

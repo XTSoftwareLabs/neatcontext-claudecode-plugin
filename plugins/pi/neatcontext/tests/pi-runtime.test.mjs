@@ -1,12 +1,11 @@
 // The pi runtime, driven the way the extension drives it: in-process, with a
 // bound session id and no MCP anywhere.
 //
-// These run against a temporary NEATCONTEXT_COMPANION_FILE, so nothing here
-// touches a real ~/.neatcontext. Most of them run with no companion at all —
-// that is the property lite contexts exist to have.
+// These run against a temporary NEATCONTEXT_HOME, so nothing here
+// touches a real ~/.neatcontext.
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -18,9 +17,7 @@ let session;
 
 before(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "neatcontext-pi-test-"));
-  // Nothing ever writes this file in this suite: the desktop app is simply not
-  // running, which is the case lite contexts have to survive.
-  process.env.NEATCONTEXT_COMPANION_FILE = path.join(home, "companion.json");
+  process.env.NEATCONTEXT_HOME = home;
 
   docs = path.join(home, "docs");
   await mkdir(docs, { recursive: true });
@@ -37,6 +34,7 @@ after(async () => {
 });
 
 beforeEach(async () => {
+  await rm(path.join(home, "contexts"), { recursive: true, force: true });
   await rm(path.join(home, "lite"), { recursive: true, force: true });
   await rm(path.join(home, "plugin-selection.json"), { force: true });
   await rm(path.join(home, "plugin-sessions"), { recursive: true, force: true });
@@ -76,27 +74,26 @@ describe("session identity", () => {
     await createOrders();
     session.bindPiSessionId("session-one");
     await runtime.commandUse("Orders");
-    assert.match(await runtime.commandStatus(), /Connected context: Orders \(lite\)/);
+    assert.match(await runtime.commandStatus(), /Connected context: Orders/);
 
     session.bindPiSessionId("session-two");
     assert.match(await runtime.commandStatus(), /No context is connected yet/);
   });
 });
 
-describe("lite contexts, with no desktop app", () => {
+describe("local Contexts", () => {
   it("creates, lists, connects, and grounds", async () => {
     const created = await createOrders();
-    assert.match(created, /Created the "Orders" lite context/);
+    assert.match(created, /Created the "Orders" context/);
     assert.match(created, /Routes here for:  order-events lag/);
 
     const list = await runtime.commandList();
-    assert.match(list, /Lite contexts:\n {2}1\. Orders/);
-    assert.match(list, /Standard contexts:\n {2}\(none/);
+    assert.match(list, /Contexts:\n {2}1\. Orders/);
 
-    assert.match(await runtime.commandUse("Orders"), /Connected the "Orders" lite context/);
+    assert.match(await runtime.commandUse("Orders"), /Connected the "Orders" context/);
 
     const context = await runtime.getContext();
-    assert.match(context, /NeatContext Lite — connected context: Orders/);
+    assert.match(context, /NeatContext — connected context: Orders/);
     assert.match(context, /runbook\.md/);
     // The plugin's own notes ride on every get_context, so a mid-session mode
     // change reaches the model without a restart.
@@ -128,6 +125,18 @@ describe("lite contexts, with no desktop app", () => {
     assert.match(await runtime.commandDisconnect(), /No context is connected to this session/);
   });
 
+  it("reports and clears an unavailable legacy selection", async () => {
+    const selectionFile = path.join(home, "plugin-sessions", "pi-test-session.json");
+    await mkdir(path.dirname(selectionFile), { recursive: true });
+    await writeFile(
+      selectionFile,
+      `${JSON.stringify({ contextId: "unavailable:old", contextName: "Old selection" })}\n`
+    );
+    assert.match(await runtime.commandStatus(), /Old selection.*not available/s);
+    assert.match(await runtime.commandStatus(), /No context is connected yet/);
+    await assert.rejects(readFile(selectionFile, "utf8"), { code: "ENOENT" });
+  });
+
   it("deletes only after confirmation", async () => {
     await createOrders();
     const plan = await runtime.deleteContext("Orders");
@@ -138,8 +147,8 @@ describe("lite contexts, with no desktop app", () => {
 
     const done = await runtime.deleteContext("Orders", { confirm: true });
     assert.equal(done.done, true);
-    assert.match(done.text, /Deleted the "Orders" lite context/);
-    assert.match(await runtime.commandList(), /\(none — create one/);
+    assert.match(done.text, /Deleted the "Orders" context/);
+    assert.match(await runtime.commandList(), /\(none — save this conversation/);
   });
 });
 
@@ -205,7 +214,7 @@ describe("routing", () => {
     await runtime.commandUse("Orders");
 
     const preview = await runtime.previewContext({ context: "Billing" });
-    assert.match(preview, /# Billing \(lite\)/);
+    assert.match(preview, /# Billing/);
     assert.match(preview, /runbook\.md/);
     assert.match(await runtime.commandStatus(), /Connected context: Orders/);
   });
@@ -228,7 +237,7 @@ describe("routing", () => {
     assert.match(instructions, /^# NeatContext/);
     assert.match(instructions, /No NeatContext Context is connected to this session right now/);
     assert.match(instructions, /## Contexts available on this machine/);
-    assert.match(instructions, /- \*\*Orders\*\* \(lite\)/);
+    assert.match(instructions, /- \*\*Orders\*\*/);
     assert.match(instructions, /## Connecting a context, in pi/);
   });
 
@@ -261,6 +270,35 @@ describe("save", () => {
     assert.match(await runtime.commandList(), /Queue lag/);
   });
 
+  it("exports a saved Context and keeps the neutral manifest", async () => {
+    await runtime.saveContext({
+      name: "Queue lag",
+      profile: "# Queue lag\n\n## Purpose\n\nPartition skew.\n",
+      routingDescription: "order-events partition lag",
+      knowledge
+    });
+    const destination = path.join(home, "exports");
+    const exported = await runtime.exportContext({
+      context: "Queue lag",
+      destination
+    });
+    assert.match(exported, /Exported the "Queue lag" context/);
+    assert.match(exported, /the export is a copy/);
+    const bundle = /Bundle folder:\s+(.+)/.exec(exported)[1];
+    const manifest = JSON.parse(await readFile(path.join(bundle, "context.json"), "utf8"));
+    assert.equal(manifest.schema, 2);
+    assert.equal("kind" in manifest, false);
+  });
+
+  it("refuses to export a Context whose knowledge is externally owned", async () => {
+    await createOrders();
+    const exported = await runtime.exportContext({
+      context: "Orders",
+      destination: path.join(home, "exports")
+    });
+    assert.match(exported, /links a knowledge folder this plugin does not own/);
+  });
+
   it("plans an update with the existing profile and knowledge inline", async () => {
     await runtime.saveContext({
       name: "Queue lag",
@@ -271,7 +309,7 @@ describe("save", () => {
 
     const plan = await runtime.saveContext({ name: "Queue lag" });
     assert.match(plan, /Save action: update/);
-    assert.match(plan, /targetId: lite:queue-lag/);
+    assert.match(plan, /targetId: context:queue-lag/);
     assert.match(plan, /baseHash: [0-9a-f]{8}/);
     // The merge inputs come back with the plan, so drafting is one round trip.
     assert.match(plan, /## Existing domain profile/);
@@ -304,7 +342,7 @@ describe("save", () => {
     };
 
     const preview = await runtime.saveContext(capture);
-    assert.match(preview, /Update the "Queue lag" lite context\?/);
+    assert.match(preview, /Update the "Queue lag" context\?/);
     assert.match(preview, /Add: decisions\.md/);
     assert.match(preview, /`confirm: true`/);
 
@@ -319,7 +357,7 @@ describe("save", () => {
     await createOrders("Queue lag");
     const plan = await runtime.saveContext({ name: "Queue lags" });
     assert.match(plan, /Save action: choose/);
-    assert.match(plan, /Queue lag \(lite\)/);
+    assert.match(plan, /Queue lag/);
   });
 
   it("updates the context this session is already on when given no name", async () => {

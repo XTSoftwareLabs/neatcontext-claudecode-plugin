@@ -1,6 +1,6 @@
 ---
 name: save
-description: Save durable decisions, findings, plans, and implementation knowledge from the visible Codex conversation into a new or existing NeatContext lite context. Use only when the user explicitly invokes this skill or asks to preserve the current conversation as reusable context.
+description: Save durable decisions, findings, plans, and implementation knowledge from the visible Codex conversation into a new or existing NeatContext context. Use only when the user explicitly invokes this skill or asks to preserve the current conversation as reusable context.
 ---
 
 # Save conversation context
@@ -24,7 +24,7 @@ Follow the CLI's `Save action`:
 - `create`: create a new context using the resolved or derived name.
 - `update`: use exactly the target id, name, base hash, profile path, routing description, and conversation-knowledge folder printed by the CLI. Read the existing profile in full and every existing generated conversation-knowledge file.
 - `choose`: show the possible matches and wait for the user to choose.
-- `unavailable`: relay the reason and ask for a new lite-context name.
+- `unavailable`: relay the reason and ask for a new context name.
 
 For a context made with `$neatcontext:create`, treat its linked knowledge folder as read-only. Read only files relevant to this conversation. Generated conversation additions belong in the bundle-local conversation-knowledge folder.
 

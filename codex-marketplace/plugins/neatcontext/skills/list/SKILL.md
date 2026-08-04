@@ -1,6 +1,6 @@
 ---
 name: list
-description: List the NeatContext lite and standard contexts available to the current Codex thread. Use when the user asks what contexts exist, what can be connected, or explicitly invokes this skill.
+description: List the local NeatContext Contexts available to the current Codex thread. Use when the user asks what contexts exist, what can be connected, or explicitly invokes this skill.
 ---
 
 # List contexts
