@@ -8,6 +8,13 @@
 // still carrying the legacy `kind: "lite"` marker matched neither shape the
 // reader accepted, and updating any legacy context produced exactly that.
 //
+// The second constraint is that a machine can have several host plugins
+// installed at different versions, all sharing ~/.neatcontext. A release
+// predating the unified model reads only the legacy root and accepts a manifest
+// only when the marker is present, without ever looking at the schema. So a
+// legacy bundle must be read where it lies and keep its marker: relocating it,
+// or writing it away, empties the list in every host not yet updated.
+//
 // So the fixtures here are hand-written, byte-for-byte as an older build left
 // them, and everything runs through the real CLI and the real MCP bridge as
 // spawned processes — the same path Claude Code drives. Nothing imports the
@@ -15,14 +22,15 @@
 //
 // Covered, per legacy shape:
 //   * it is listed, connectable, and served by get_context
-//   * updating it keeps it listed (the regression) and upgrades the manifest
-//   * a bundle left in the pre-migration root is migrated and stays usable
-//   * a bundle an older build already broke is readable again, and self-heals
+//   * updating it keeps it listed (the regression) and keeps the marker
+//   * a bundle in the pre-unification root is read in place, never relocated
+//   * updating such a bundle leaves it readable to an older release
+//   * a bundle an older build already broke is readable again
 //   * export/import round-trips it
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import readline from "node:readline";
 import path from "node:path";
@@ -218,10 +226,14 @@ describe("a context saved by an earlier release", () => {
     }
   });
 
-  it("is still there after an update, and its manifest is upgraded in place", async () => {
+  it("is still there after an update, and keeps the marker an older release needs", async () => {
     // The regression: writing the current schema over a legacy manifest used to
     // leave `kind: "lite"` behind, and the result matched no readable shape. The
     // bundle stayed on disk and the context vanished from every command.
+    //
+    // The marker itself is kept on purpose — a release that predates the
+    // unified model shares this store and accepts a manifest only when it is
+    // there. What had to change was reading, not writing.
     const { directory } = await writeLegacyBundle("Payments Legacy");
     await cli("use", "Payments Legacy");
 
@@ -240,7 +252,11 @@ describe("a context saved by an earlier release", () => {
 
     const manifest = await readManifest(directory);
     assert.equal(manifest.schema, 2);
-    assert.equal(manifest.kind, undefined, "the legacy marker must not survive the upgrade");
+    assert.equal(
+      manifest.kind,
+      "lite",
+      "the marker an older release reads by must survive the update"
+    );
     assert.equal(manifest.revision, 2);
     assert.equal(manifest.id, "lite:payments-legacy", "the identifier must not change");
 
@@ -257,18 +273,18 @@ describe("a context saved by an earlier release", () => {
     );
   });
 
-  it("is migrated out of the pre-unification root and stays usable", async () => {
-    // Older releases stored bundles under ~/.neatcontext/lite/.
+  it("is read where it lies in the pre-unification root, and is never relocated", async () => {
+    // Older releases stored bundles under ~/.neatcontext/lite/ and read only
+    // that root. Several host plugins share this machine and update at
+    // different times, so moving a bundle out of it would make every context
+    // vanish from every host still on such a release. It has to be read in
+    // place instead.
     await writeLegacyBundle("Orders Legacy", { root: "lite", folder: "orders-legacy" });
+    const original = path.join(home, "lite", "orders-legacy");
 
     assert.match(await cli("list"), /Orders Legacy/);
-
-    const moved = path.join(home, "contexts", "orders-legacy");
-    const manifest = await readManifest(moved);
-    assert.equal(manifest.schema, 2);
-    assert.equal(manifest.kind, undefined);
-
     assert.match(await cli("use", "Orders Legacy"), /Connected the "Orders Legacy" context/);
+
     const bridge = openBridge();
     try {
       await bridge.handshake();
@@ -276,6 +292,45 @@ describe("a context saved by an earlier release", () => {
     } finally {
       await bridge.close();
     }
+
+    // Still where the older release put it, still in the shape it wrote.
+    assert.ok(
+      await stat(original).then(() => true).catch(() => false),
+      "the bundle must not be moved out of the legacy root"
+    );
+    const manifest = await readManifest(original);
+    assert.equal(manifest.kind, "lite");
+    assert.ok(
+      await stat(path.join(home, "contexts", "orders-legacy"))
+        .then(() => false)
+        .catch(() => true),
+      "nothing may be copied into the neutral root either"
+    );
+  });
+
+  it("is updated in place in the legacy root, staying readable to an older release", async () => {
+    // The full mixed-version round trip: a bundle an older release created,
+    // updated by this one, has to stay where it was, keep its marker, and carry
+    // the new content.
+    await writeLegacyBundle("Refunds Legacy", { root: "lite", folder: "refunds-legacy" });
+    const directory = path.join(home, "lite", "refunds-legacy");
+
+    const capture = await writeUpdateCapture("Refunds Legacy", {
+      profile: "# Refunds Legacy\n\n## Purpose\nUpdated from the unified plugin.\n",
+      summary: "# Refunds Legacy summary\n\nUpdated from the unified plugin.\n"
+    });
+    const saved = await cli("save", "--from", capture, "--yes");
+    assert.match(saved, /Updated context: Refunds Legacy/);
+    assert.doesNotMatch(saved, /NeatContext plugin error/);
+
+    const manifest = await readManifest(directory);
+    assert.equal(manifest.kind, "lite", "an older release must still accept it");
+    assert.equal(manifest.revision, 2);
+    assert.match(
+      await readFile(path.join(directory, "profile.md"), "utf8"),
+      /Updated from the unified plugin/
+    );
+    assert.match(await cli("list"), /Refunds Legacy/);
   });
 
   it("is readable again when an older build already broke its manifest", async () => {
@@ -297,13 +352,13 @@ describe("a context saved by an earlier release", () => {
       await bridge.close();
     }
 
-    // And the next update writes the marker away, so the bundle stops being odd.
+    // And it stays recovered across an update, rather than lapsing back.
     const capture = await writeUpdateCapture("Stranded Legacy", {
       profile: "# Stranded Legacy\n\n## Purpose\nRecovered and updated.\n",
       summary: "# Stranded Legacy summary\n\nRecovered.\n"
     });
     assert.match(await cli("save", "--from", capture, "--yes"), /Updated context: Stranded Legacy/);
-    assert.equal((await readManifest(directory)).kind, undefined);
+    assert.equal((await readManifest(directory)).revision, 2);
     assert.match(await cli("list"), /Stranded Legacy/);
   });
 

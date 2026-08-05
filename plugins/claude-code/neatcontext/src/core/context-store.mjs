@@ -125,52 +125,19 @@ async function readableContext(directory) {
   }
 }
 
-async function upgradeLegacyManifest(directory) {
-  const manifestPath = path.join(directory, "context.json");
-  const temporaryPath = path.join(
-    directory,
-    `.context-migration-${randomBytes(6).toString("hex")}.json`
-  );
-  try {
-    const parsed = JSON.parse(await readFile(manifestPath, "utf8"));
-    if (parsed?.schema !== LEGACY_SCHEMA || parsed?.kind !== "lite") return;
-    parsed.schema = CONTEXT_SCHEMA;
-    parsed.profileFile = "profile.md";
-    delete parsed.kind;
-    await writeFile(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-    await rename(temporaryPath, manifestPath);
-  } finally {
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
-  }
-}
-
-// Migrate one validated legacy directory at a time. Both roots and both schema
-// versions remain readable, so an interruption resumes on the next list.
-export async function migrateLegacyContexts() {
-  let entries;
-  try {
-    entries = await readdir(legacyContextHome(), { withFileTypes: true });
-  } catch {
-    return;
-  }
-  await mkdir(contextHome(), { recursive: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) {
-      continue;
-    }
-    const source = path.join(legacyContextHome(), entry.name);
-    const target = path.join(contextHome(), entry.name);
-    if (!(await readableContext(source)) || (await directoryExists(target))) {
-      continue;
-    }
-    // A concurrent process may move or upgrade this directory first. Either
-    // readable representation is safe because both roots are scanned below.
-    try {
-      await rename(source, target);
-      await upgradeLegacyManifest(target);
-    } catch {}
-  }
-}
+// A context bundle written by an earlier release stays exactly where that
+// release put it.
+//
+// Relocating it is the one thing this store must not do while a machine can
+// have several host plugins installed at different versions. They all share
+// ~/.neatcontext, and a release that predates the unified Context model reads
+// only the legacy root — so moving a bundle out of it makes every context
+// vanish from every host that has not been updated yet. The bundle is intact
+// and invisible, with nothing to point the user at.
+//
+// Nothing is lost by leaving them: both roots are scanned below, and both
+// manifest shapes are readable. A future release can relocate them once no
+// supported version reads the legacy root.
 
 async function scanContextRoot(root) {
   let entries;
@@ -188,11 +155,10 @@ async function scanContextRoot(root) {
   return records;
 }
 
-// Every readable Context, sorted by name. One malformed directory never hides
-// the others. The neutral root wins if an interrupted migration left a duplicate
-// identifier in both locations.
+// Every readable Context, sorted by name, from both roots. One malformed
+// directory never hides the others. The neutral root wins if the same
+// identifier somehow appears in both locations.
 export async function listContexts() {
-  await migrateLegacyContexts();
   const records = [
     ...(await scanContextRoot(contextHome())),
     ...(await scanContextRoot(legacyContextHome()))
@@ -631,6 +597,11 @@ export async function previewCapturedContextUpdate(capture) {
 }
 
 async function acquireUpdateLock(record) {
+  // Locks and staging live in the neutral root even when the context being
+  // updated is still in the legacy one, so the root has to exist before either
+  // is taken. Nothing else creates it on a machine whose contexts all predate
+  // the unified model and are left where they are.
+  await mkdir(contextHome(), { recursive: true });
   const lock = path.join(contextHome(), `.update-${slugify(record.id)}.lock`);
   try {
     await mkdir(lock);
@@ -715,12 +686,13 @@ export async function updateCapturedContext(capture) {
           ? capture.updatedFrom.trim()
           : "conversation"
     };
-    // Writing CONTEXT_SCHEMA over a legacy manifest is an upgrade, so the
-    // legacy marker has to go with it — `...stored` carries it in, and a
-    // manifest that claims the current schema while still saying `kind: "lite"`
-    // matches neither shape recordFor accepts, which makes the context
-    // unreadable. upgradeLegacyManifest and exportContext already drop it.
-    delete manifest.kind;
+    // `...stored` carries the legacy `kind: "lite"` marker through, and it is
+    // kept on purpose for a bundle that already had one. A release predating
+    // the unified Context model shares this store and accepts a manifest only
+    // when that marker is present — it never looks at the schema — so dropping
+    // it here would make the context disappear from every host still on that
+    // release, the moment it was updated from a newer one. Readers here ignore
+    // it at the current schema, so the same file satisfies both.
     if (prepared.record.knowledgeManaged) {
       manifest.knowledgeFolder = "knowledge";
       manifest.knowledgeManaged = true;

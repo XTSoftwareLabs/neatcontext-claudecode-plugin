@@ -196,30 +196,40 @@ describe("local Context storage", () => {
   });
 });
 
-describe("legacy migration", () => {
-  it("moves a schema 1 folder and upgrades its manifest", async () => {
+describe("legacy contexts", () => {
+  it("reads a schema 1 folder where it lies, without moving or rewriting it", async () => {
+    // Several host plugins share this store and update at different times. A
+    // release predating the unified model reads only this root, so relocating
+    // the folder — or rewriting the manifest it recognizes — would empty the
+    // list in every host still on that release.
     const directory = path.join(home, "lite", "legacy-context");
     await mkdir(directory, { recursive: true });
     await writeFile(path.join(directory, "profile.md"), "# Legacy\n\n## Purpose\nOld data.\n");
+    const written = {
+      schema: 1,
+      kind: "lite",
+      id: "lite:legacy-context",
+      name: "Legacy",
+      profileFile: "profile.md",
+      knowledgeFolder: docs,
+      knowledgeManaged: false
+    };
     await writeFile(
       path.join(directory, "context.json"),
-      `${JSON.stringify({
-        schema: 1,
-        kind: "lite",
-        id: "lite:legacy-context",
-        name: "Legacy",
-        profileFile: "profile.md",
-        knowledgeFolder: docs,
-        knowledgeManaged: false
-      }, null, 2)}\n`
+      `${JSON.stringify(written, null, 2)}\n`
     );
 
     assert.match(await cli("list"), /Legacy/);
-    const migrated = path.join(home, "contexts", "legacy-context");
-    const manifest = JSON.parse(await readFile(path.join(migrated, "context.json"), "utf8"));
-    assert.equal(manifest.schema, 2);
-    assert.equal("kind" in manifest, false);
-    assert.equal(manifest.profileFile, "profile.md");
+    assert.deepEqual(
+      JSON.parse(await readFile(path.join(directory, "context.json"), "utf8")),
+      written,
+      "listing must not rewrite a legacy manifest"
+    );
+    await assert.rejects(
+      readFile(path.join(home, "contexts", "legacy-context", "context.json"), "utf8"),
+      { code: "ENOENT" },
+      "listing must not relocate a legacy context"
+    );
     await mkdir(path.join(home, "plugin-sessions"), { recursive: true });
     await writeFile(
       path.join(home, "plugin-sessions", "context-test.json"),
@@ -234,7 +244,7 @@ describe("legacy migration", () => {
     );
   });
 
-  it("resumes safely when a destination directory already exists", async () => {
+  it("prefers the neutral root when the same identifier exists in both", async () => {
     const legacy = path.join(home, "lite", "collision");
     const current = path.join(home, "contexts", "collision");
     await mkdir(legacy, { recursive: true });
