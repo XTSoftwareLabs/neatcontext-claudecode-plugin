@@ -12,11 +12,15 @@
 //   binding      never leaves this machine  which program provides it, and how
 //
 // So the normalizer below is a whitelist, not a validator that merely rejects
-// bad input. Every field outside `ALLOWED_FIELDS` is dropped on the way in and
-// on the way out, which means a context handed to you by someone else cannot
-// carry a command to run, a path to execute, an environment to inject, or a
-// token to spend — not even if its author wrote one into context.json by hand.
-// Importing a context can therefore never, by itself, make anything runnable.
+// bad input, and it is a whitelist by construction rather than by filtering:
+// `normalizeExtensionDeclaration` and `serializeExtensionDeclarations` never
+// copy the object handed to them. Each builds a fresh entry out of the four
+// fields it names — id, capability, importance, tools — so anything else an
+// input carries is gone on the way in and on the way out, without anyone having
+// to remember to strip it. A context handed to you by someone else therefore
+// cannot carry a command to run, a path to execute, an environment to inject,
+// or a token to spend, not even if its author wrote one into context.json by
+// hand. Importing a context can never, by itself, make anything runnable.
 
 export const MAX_EXTENSIONS = 8;
 export const MAX_DECLARED_TOOLS = 64;
@@ -26,8 +30,6 @@ const MAX_CAPABILITY_LENGTH = 200;
 // hosts that receive that name accept only letters, digits, `_` and `-`.
 const EXTENSION_ID = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 const TOOL_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-
-const ALLOWED_FIELDS = new Set(["id", "capability", "importance", "tools"]);
 
 export class ExtensionDeclarationError extends Error {}
 
