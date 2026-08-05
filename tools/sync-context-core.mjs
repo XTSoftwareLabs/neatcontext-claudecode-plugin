@@ -10,6 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const files = [
   "context-store.mjs",
   "extension-bindings.mjs",
+  "extension-commands.mjs",
   "extension-runtime.mjs",
   "extensions.mjs",
   "local-state.mjs",

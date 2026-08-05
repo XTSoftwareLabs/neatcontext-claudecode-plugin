@@ -15,6 +15,8 @@
 //   mode [auto|ask|manual]     how the session may route itself between contexts
 //   describe <query> --use-when   record what a context should be routed for
 //   alias <query> --called        record what the user calls a context
+//   extensions [add|remove|test]  what the connected context expects to reach,
+//                                 and whether this machine provides it
 //
 // Exit code is always 0: the output is meant to be read, not branched on.
 
@@ -45,6 +47,12 @@ import {
   sessionId,
   setMode
 } from "../core/routing.mjs";
+import {
+  addExtensionToContext,
+  removeExtensionFromContext,
+  renderExtensionsStatus,
+  testExtension
+} from "../core/extension-commands.mjs";
 import { normalizeSaveState } from "../core/session-state.mjs";
 import {
   renderEvidenceBlocks,
@@ -244,6 +252,14 @@ async function commandStatus(state) {
             `(${generated.files.length} files)`
         );
       }
+    }
+    // Named but not started here: finding out whether an extension is actually
+    // reachable means launching it, which `status` should not do on its own.
+    if (connected.record.extensions.length > 0) {
+      print(
+        `  Extensions:       ${connected.record.extensions.map((entry) => entry.id).join(", ")} ` +
+          "(run `/neatcontext:extensions` to see whether this machine provides them)"
+      );
     }
     reportMode();
     return;
@@ -828,6 +844,60 @@ async function commandDelete(state, query, flags) {
   }
 }
 
+// `extensions`, `extensions add <id>`, `extensions remove <id>`,
+// `extensions test <id>`. Everything here acts on the connected context,
+// because an extension belongs to a context rather than to the machine.
+async function commandExtensions(state, query, flags) {
+  const [action = "", ...rest] = query.split(/\s+/).filter(Boolean);
+  const id = rest.join(" ").trim();
+  const record = state.connected?.record ?? null;
+
+  if (action.length === 0 || action === "status") {
+    print(await renderExtensionsStatus(record));
+    return;
+  }
+  if (!record) {
+    print("No context is connected to this session, so there is nothing to change.");
+    return;
+  }
+
+  if (action === "add") {
+    const capability = typeof flags.capability === "string" ? flags.capability : "";
+    if (id.length === 0 || capability.trim().length === 0) {
+      print(
+        'Use: extensions add <id> --capability "what it lets this context do" ' +
+          "[--tools a,b] [--important]"
+      );
+      return;
+    }
+    const added = await addExtensionToContext(record, id, {
+      capability,
+      tools: typeof flags.tools === "string" ? flags.tools : undefined,
+      important: flags.important === true || flags.important === "true"
+    });
+    print(added.text);
+    return;
+  }
+  if (action === "remove") {
+    if (id.length === 0) {
+      print("Use: extensions remove <id>");
+      return;
+    }
+    print((await removeExtensionFromContext(record, id)).text);
+    return;
+  }
+  if (action === "test") {
+    if (id.length === 0) {
+      print("Use: extensions test <id>");
+      return;
+    }
+    print(await testExtension(record, id));
+    return;
+  }
+
+  print(`Unknown extensions action "${action}". Use: status | add | remove | test.`);
+}
+
 async function run() {
   const [command = "status", ...rest] = process.argv.slice(2);
   const { flags, query } = parseArgs(rest);
@@ -892,9 +962,13 @@ async function run() {
     await commandDescribe(state, query, flags);
     return;
   }
+  if (command === "extensions") {
+    await commandExtensions(state, query, flags);
+    return;
+  }
   print(
     `Unknown command "${command}". ` +
-      "Use: status | list | use | disconnect | create | save-target | evidence | save | import | export | delete | mode | alias | describe."
+      "Use: status | list | use | disconnect | create | save-target | evidence | save | import | export | delete | mode | alias | describe | extensions."
   );
 }
 

@@ -185,6 +185,28 @@ describe("what a context may declare", () => {
     );
   });
 
+  it("answers whether an edit is possible without raising", () => {
+    assert.equal(declarations.declarationProblem([], PAGERDUTY), null);
+    assert.match(
+      declarations.declarationProblem([], { id: "Has Space", capability: "x" }),
+      /not a usable extension id/
+    );
+    assert.equal(declarations.removalProblem([PAGERDUTY], "pagerduty"), null);
+    assert.match(
+      declarations.removalProblem([PAGERDUTY], "datadog"),
+      /does not declare an extension/
+    );
+
+    // A fault that is not about the declaration is not disguised as one.
+    const exploding = {
+      get id() {
+        throw new TypeError("boom");
+      }
+    };
+    assert.throws(() => declarations.declarationProblem([], exploding), TypeError);
+    assert.throws(() => declarations.removalProblem([exploding], "pagerduty"), TypeError);
+  });
+
   it("namespaces a tool by its extension and reads the name back", () => {
     assert.equal(declarations.qualifiedToolName("pagerduty", "get_incident"), "pagerduty__get_incident");
     assert.deepEqual(declarations.parseQualifiedToolName("pagerduty__get_incident"), {

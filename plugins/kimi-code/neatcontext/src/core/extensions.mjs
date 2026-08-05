@@ -214,6 +214,32 @@ export function removeExtensionDeclaration(declarations, id) {
   return remaining;
 }
 
+// Why this edit cannot be made, or null if it can.
+//
+// A hand-typed id or a capability line someone left blank is ordinary input for
+// the `extensions` command, not a defect, so the command layer asks first rather
+// than catching. Anything these throw that is not about the declaration itself
+// is a real fault and is left to travel.
+export function declarationProblem(declarations, entry) {
+  try {
+    addExtensionDeclaration(declarations, entry);
+    return null;
+  } catch (error) {
+    if (error instanceof ExtensionDeclarationError) return error.message;
+    throw error;
+  }
+}
+
+export function removalProblem(declarations, id) {
+  try {
+    removeExtensionDeclaration(declarations, id);
+    return null;
+  } catch (error) {
+    if (error instanceof ExtensionDeclarationError) return error.message;
+    throw error;
+  }
+}
+
 // Which of an extension's tools this context actually wants. A declaration that
 // names none takes whatever the extension offers; one that names some takes only
 // those, and names the rest as unmatched so the user can see a stale declaration
