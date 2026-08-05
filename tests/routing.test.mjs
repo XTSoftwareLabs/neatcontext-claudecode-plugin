@@ -85,6 +85,11 @@ function childEnv(sessionId = "routing-child") {
   return {
     ...process.env,
     CLAUDE_CODE_SESSION_ID: sessionId,
+    // A session here stands for a window, and a window is a host process of its
+    // own: two sessions must no more share the record of which session their
+    // host is on than they share a selection file.
+    NEATCONTEXT_HOST_KEY: sessionId === "" ? "" : `host-${sessionId}`,
+    CLAUDE_PID: "",
     NEATCONTEXT_HOME: home
   };
 }

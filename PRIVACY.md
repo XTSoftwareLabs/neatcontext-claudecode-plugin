@@ -63,6 +63,10 @@ By default, the plugins store or read data in these locations:
   for compatible local migration.
 - `~/.neatcontext/plugin-selection.json` and
   `~/.neatcontext/plugin-sessions/` for context selections.
+- `~/.neatcontext/plugin-hosts/` for which session each running coding-host
+  process is on, so a long-lived plugin process and the commands run beside it
+  agree on whose context to read. Each file holds a host session id and the
+  process ids that wrote it, and is removed when that host process is gone.
 - `~/.neatcontext/plugin-routing.json` for routing metadata and a bounded
   history of recent routing decisions. In Claude Code this file also holds the
   host-provided transcript path for a bounded set of recent sessions; it does
