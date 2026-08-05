@@ -405,11 +405,12 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
   assert.equal(bound.result.isError, false);
   assert.match(bound.result.content[0].text, /"payment team" context is selected/);
 
-  const rebound = await first.call(
-    toolCall(7, "bind_session", { session_id: "kimi-mcp-b" })
+  // Binding the same session again is idempotent, not an error.
+  const reboundSame = await first.call(
+    toolCall(7, "bind_session", { session_id: "kimi-mcp-a" })
   );
-  assert.equal(rebound.result.isError, true);
-  assert.match(rebound.result.content[0].text, /already bound to another/);
+  assert.equal(reboundSame.result.isError, false);
+  assert.match(reboundSame.result.content[0].text, /already bound to this Kimi Code session/);
 
   const boundTools = await first.call({
     jsonrpc: "2.0",
@@ -426,12 +427,34 @@ test("Kimi MCP bridge exposes nothing session-dependent until binding", async (t
   const grounded = await first.call(toolCall(9, "get_context"));
   assert.match(grounded.result.content[0].text, /connected context: payment team/i);
 
-  await second.call(initialize(10));
+  // A new session in the same window: the bridge process survives it, and the
+  // new session's skill expansion binds the new id. The bridge must follow the
+  // session that is actually asking — this used to error until Kimi restarted.
+  const rebound = await first.call(
+    toolCall(10, "bind_session", { session_id: "kimi-mcp-b" })
+  );
+  assert.equal(rebound.result.isError, false);
+  assert.match(rebound.result.content[0].text, /No NeatContext context is selected/);
+  const afterRebind = await first.call(toolCall(11, "get_context"));
+  assert.match(afterRebind.result.content[0].text, /No NeatContext Context is connected/);
+  assert.doesNotMatch(afterRebind.result.content[0].text, /Connected context: payment team/);
+
+  // And back: re-binding the earlier session re-grounds in its selection. A
+  // context belongs to the session it was connected for, not to the bridge.
+  const reboundBack = await first.call(
+    toolCall(12, "bind_session", { session_id: "kimi-mcp-a" })
+  );
+  assert.equal(reboundBack.result.isError, false);
+  assert.match(reboundBack.result.content[0].text, /"payment team" context is selected/);
+  const regrounded = await first.call(toolCall(13, "get_context"));
+  assert.match(regrounded.result.content[0].text, /connected context: payment team/i);
+
+  await second.call(initialize(14));
   const boundSecond = await second.call(
-    toolCall(11, "bind_session", { session_id: "kimi-mcp-b" })
+    toolCall(15, "bind_session", { session_id: "kimi-mcp-b" })
   );
   assert.match(boundSecond.result.content[0].text, /No NeatContext context is selected/);
-  const ungrounded = await second.call(toolCall(12, "get_context"));
+  const ungrounded = await second.call(toolCall(16, "get_context"));
   assert.match(ungrounded.result.content[0].text, /No NeatContext Context is connected/);
   assert.doesNotMatch(ungrounded.result.content[0].text, /Connected context: payment team/);
 
