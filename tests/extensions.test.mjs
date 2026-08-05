@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 
@@ -245,6 +246,14 @@ describe("what this machine agrees to provide", () => {
       ["ok", { command: "node", args: [1] }, /must be a string/],
       ["ok", { command: "node", env: [] }, /must be an object of name/],
       ["ok", { command: "node", env: { "bad name": "x" } }, /not a usable environment variable name/],
+      [
+        "ok",
+        {
+          command: "node",
+          env: Object.fromEntries(new Array(65).fill(null).map((_, i) => [`V${i}`, "x"]))
+        },
+        /more than 64 environment variables/
+      ],
       ["ok", { command: "node", env: { OK: 1 } }, /must be a string/],
       ["ok", { command: "node", envFrom: "PD" }, /must be an array/],
       ["ok", { command: "node", envFrom: ["1bad"] }, /not a usable environment variable name/],
@@ -462,6 +471,51 @@ describe("talking to a bound server", () => {
     }
   });
 
+  it("survives a pipe that goes away underneath it", async () => {
+    // A real child rarely loses its stdin at exactly the wrong moment, but when
+    // it does the session must get an error rather than a promise that never
+    // settles — and the notification and shutdown paths must swallow the same
+    // failure instead of taking the session down on the way out. A fake process
+    // is the honest way to stage that ordering.
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    stderr.setEncoding = () => {};
+    let answeredInitialize = false;
+    const failingChild = () => ({
+      stdin: {
+        write(line) {
+          if (answeredInitialize) throw new Error("EPIPE");
+          answeredInitialize = true;
+          const { id } = JSON.parse(line);
+          stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { ok: true } })}\n`);
+          return true;
+        },
+        end() {
+          throw new Error("already closed");
+        }
+      },
+      stdout,
+      stderr,
+      once: () => undefined,
+      kill: () => undefined
+    });
+
+    const client = clientModule.createStdioMcpClient({
+      command: "fake",
+      args: [],
+      env: {},
+      timeoutMs: 500,
+      spawnProcess: failingChild
+    });
+    // The `notifications/initialized` write throws and is swallowed, so the
+    // handshake still completes.
+    assert.deepEqual(await client.initialize(), { ok: true });
+    await assert.rejects(client.listTools(), /could not write to fake: EPIPE/);
+    client.close();
+    assert.equal(client.closed, true);
+    await assert.rejects(client.listTools(), /not running/);
+  });
+
   it("passes only the environment it was given", async () => {
     const client = clientModule.createStdioMcpClient({
       command: process.execPath,
@@ -565,27 +619,11 @@ describe("serving a context's extensions", () => {
   });
 
   it("reports a server that offers none of the declared tools", async () => {
+    // The binding's `env` is the whole of what the server sees, so it is also
+    // how the test tells this one what to offer.
     await writeBindingsFile({
       pagerduty: serverBinding({ env: { FAKE_MCP_TOOLS: "something_else" } })
     });
-    // The binding's own env is what the server sees, so give it what it needs.
-    await writeFile(
-      path.join(home, "extensions.json"),
-      `${JSON.stringify(
-        {
-          schema: 1,
-          extensions: {
-            pagerduty: {
-              command: process.execPath,
-              args: [fakeServer],
-              env: { FAKE_MCP_TOOLS: "something_else" }
-            }
-          }
-        },
-        null,
-        2
-      )}\n`
-    );
     const record = await contextWith([{ ...PAGERDUTY, tools: ["get_incident"] }]);
     const host = runtimeModule.createExtensionHost();
     try {
@@ -626,6 +664,67 @@ describe("serving a context's extensions", () => {
       const again = await host.call("pagerduty__get_incident", {});
       assert.equal(again.isError, true);
       assert.match(again.content[0].text, /is not running/);
+
+      // An extension that worked and then broke reads as `failed`, which is a
+      // different thing to tell the user than one that never started.
+      const { statuses } = await host.resolve(record);
+      assert.equal(statuses[0].status, "failed");
+      assert.match(statuses[0].detail, /not available right now/);
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it("starts a crashed extension again on the next list", async () => {
+    // Distinct from a binding that never worked: this one ran, so the next
+    // tools/list should try it rather than sit out the backoff.
+    await writeBindingsFile({
+      pagerduty: serverBinding({ env: { FAKE_MCP_EXIT_AFTER: "2" } })
+    });
+    const record = await contextWith([PAGERDUTY]);
+    let spawns = 0;
+    const host = runtimeModule.createExtensionHost({
+      createClient: (spec) => {
+        spawns += 1;
+        return clientModule.createStdioMcpClient(spec);
+      }
+    });
+    try {
+      const first = await host.resolve(record);
+      assert.equal(first.statuses[0].status, "ready");
+      assert.equal(spawns, 1);
+
+      // The server exits right after answering tools/list; let that land.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      const second = await host.resolve(record);
+      assert.equal(spawns, 2, "a server that ran once is started again, not backed off");
+      assert.equal(second.statuses[0].status, "ready");
+    } finally {
+      host.dispose();
+    }
+  });
+
+  it("gives the host a usable schema for a sparsely described tool", async () => {
+    await writeBindingsFile({
+      pagerduty: serverBinding({ env: { FAKE_MCP_TOOLS: "bare_tool" } })
+    });
+    const record = await contextWith([PAGERDUTY]);
+    const host = runtimeModule.createExtensionHost();
+    try {
+      const { tools } = await host.resolve(record);
+      assert.equal(tools[0].name, "pagerduty__bare_tool");
+      assert.deepEqual(tools[0].inputSchema, {
+        type: "object",
+        properties: {},
+        additionalProperties: true
+      });
+      // With no description of its own, the context's capability line is what
+      // the session gets.
+      assert.equal(
+        tools[0].description,
+        `From the "pagerduty" extension of this context — ${PAGERDUTY.capability}`
+      );
     } finally {
       host.dispose();
     }

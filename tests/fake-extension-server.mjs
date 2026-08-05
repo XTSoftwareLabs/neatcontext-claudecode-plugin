@@ -72,15 +72,20 @@ rl.on("line", (line) => {
       jsonrpc: "2.0",
       id: message.id,
       result: {
-        tools: toolNames.filter(Boolean).map((name) => ({
-          name,
-          description: `The ${name} tool.`,
-          inputSchema: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            additionalProperties: false
-          }
-        }))
+        tools: toolNames.filter(Boolean).map((name) => {
+          // A server is allowed to describe a tool sparsely, and the runtime has
+          // to hand the host something usable either way.
+          if (name.startsWith("bare_")) return { name };
+          return {
+            name,
+            description: `The ${name} tool.`,
+            inputSchema: {
+              type: "object",
+              properties: { query: { type: "string" } },
+              additionalProperties: false
+            }
+          };
+        })
       }
     });
     return;

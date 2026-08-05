@@ -47,16 +47,14 @@ export function createExtensionHost({
 
   async function connect(declaration, spec) {
     const existing = connections.get(declaration.id);
-    if (existing?.client && !existing.client.closed) {
-      return existing;
-    }
-    if (existing?.client?.closed) {
-      // It ran and then stopped. Report that rather than the original failure,
-      // and hold off before trying again.
-      if (now() - existing.failedAt < RETRY_AFTER_MS) return existing;
+    if (existing?.client) {
+      // Still up: reuse it. Gone: it ran once, so start it again now rather than
+      // waiting — a server that crashed on one call is usually fine on the next.
+      if (!existing.client.closed) return existing;
       connections.delete(declaration.id);
-    }
-    if (existing && !existing.client && now() - existing.failedAt < RETRY_AFTER_MS) {
+    } else if (existing && now() - existing.failedAt < RETRY_AFTER_MS) {
+      // It never started. That is a configuration problem, not a blip, so stop
+      // spawning it on every tools/list until the backoff has passed.
       return existing;
     }
 

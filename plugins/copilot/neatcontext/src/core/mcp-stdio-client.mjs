@@ -32,7 +32,10 @@ export function createStdioMcpClient({
   cwd = null,
   env = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  clientInfo = { name: "neatcontext", version: "0.2.7" }
+  clientInfo = { name: "neatcontext", version: "0.2.7" },
+  // Injectable so the tests can produce the failures a real child process
+  // only produces by accident: a pipe that is already gone when we write to it.
+  spawnProcess = spawn
 }) {
   let child = null;
   let closed = false;
@@ -52,7 +55,7 @@ export function createStdioMcpClient({
   }
 
   function start() {
-    child = spawn(command, args, {
+    child = spawnProcess(command, args, {
       cwd: cwd ?? undefined,
       env,
       stdio: ["pipe", "pipe", "pipe"],
