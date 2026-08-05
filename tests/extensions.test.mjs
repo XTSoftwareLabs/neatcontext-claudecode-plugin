@@ -810,6 +810,34 @@ describe("serving a context's extensions", () => {
     }
   });
 
+  it("writes the tools down for a host that cannot register them", async () => {
+    // A host whose tool list is fixed for the session reaches its extensions
+    // through one proxy, so the names and arguments have to be readable in the
+    // grounding text rather than carried by a tool schema.
+    await writeBindingsFile({
+      pagerduty: serverBinding({ env: { FAKE_MCP_TOOLS: "get_incident,bare_tool" } })
+    });
+    const record = await contextWith([PAGERDUTY]);
+    const host = runtimeModule.createExtensionHost();
+    try {
+      const { tools } = await host.resolve(record);
+      const written = runtimeModule.renderExtensionTools(tools);
+      assert.match(written, /### Calling them/);
+      assert.match(written, /pass the exact tool name below as `tool`/i);
+      assert.match(written, /`pagerduty__get_incident`/);
+      assert.match(written, /The get_incident tool\./);
+      assert.match(written, /Arguments: query/);
+      // The tool with no description of its own still gets a line, and the
+      // context's capability is not repeated under every entry.
+      assert.match(written, /`pagerduty__bare_tool`/);
+      assert.equal((written.match(/Read incidents and on-call schedules/g) ?? []).length, 0);
+    } finally {
+      host.dispose();
+    }
+    assert.equal(runtimeModule.renderExtensionTools([]), "");
+    assert.equal(runtimeModule.renderExtensionTools(undefined), "");
+  });
+
   it("says what the session can and cannot reach", () => {
     assert.equal(runtimeModule.renderExtensionStatus([]), "");
     assert.equal(runtimeModule.renderExtensionStatus(undefined), "");
