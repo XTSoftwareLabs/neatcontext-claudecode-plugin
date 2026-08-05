@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 let home;
@@ -369,5 +370,117 @@ describe("save", () => {
     });
     await runtime.commandUse("Queue lag");
     assert.match(await runtime.saveContext({}), /Save action: update/);
+  });
+});
+
+// pi is the one host whose tool list is fixed for the session, so its
+// extensions are reached through the `use_extension` proxy and named in
+// get_context rather than registered per context. What has to hold is the same
+// as everywhere else: a declaration alone runs nothing, only the connected
+// context's tools are callable, and the grounding survives all of it.
+describe("extensions", () => {
+  const fakeServer = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "tests",
+    "fake-extension-server.mjs"
+  );
+
+  async function bind(value) {
+    await writeFile(
+      path.join(home, "extensions.json"),
+      `${JSON.stringify({ schema: 1, extensions: { pagerduty: value } }, null, 2)}\n`
+    );
+  }
+
+  async function declaredOrders() {
+    await createOrders();
+    await runtime.commandUse("Orders");
+    return runtime.declareExtension({
+      id: "pagerduty",
+      capability: "Read incidents.",
+      tools: ["get_incident"]
+    });
+  }
+
+  it("declares without connecting anything", async () => {
+    const declared = await declaredOrders();
+    assert.match(declared, /now expects the "pagerduty" extension/);
+    assert.match(declared, /That is a declaration, not a connection/);
+    assert.match(await runtime.commandExtensions(""), /not configured on this machine/);
+    // Nothing to call, and the model is told why rather than left guessing.
+    assert.match(
+      await runtime.useExtension({ tool: "pagerduty__get_incident" }),
+      /none of them are available right now/
+    );
+    assert.match(await runtime.getContext(), /\(not configured on this machine\)/);
+  });
+
+  it("calls a bound extension and names the tools in get_context", async () => {
+    await declaredOrders();
+    await bind({ command: process.execPath, args: [fakeServer] });
+
+    const grounding = await runtime.getContext();
+    assert.match(grounding, /## Extensions this context expects/);
+    assert.match(grounding, /### Calling them/);
+    assert.match(grounding, /`pagerduty__get_incident`/);
+    assert.match(grounding, /Arguments: query/);
+    // Only what the context declared.
+    assert.doesNotMatch(grounding, /pagerduty__search_incidents/);
+
+    const result = await runtime.useExtension({
+      tool: "pagerduty__get_incident",
+      arguments: { query: "INC-1" }
+    });
+    assert.match(result, /get_incident ran with \{"query":"INC-1"\}/);
+
+    assert.match(
+      await runtime.useExtension({ tool: "pagerduty__search_incidents" }),
+      /is not something this context can call\. It can call: pagerduty__get_incident\./
+    );
+    assert.match(await runtime.commandExtensions("test pagerduty"), /pagerduty: ready/);
+  });
+
+  it("stops at the context boundary and when nothing is connected", async () => {
+    await declaredOrders();
+    await bind({ command: process.execPath, args: [fakeServer] });
+    await runtime.useExtension({ tool: "pagerduty__get_incident" });
+
+    await createOrders("Billing");
+    await runtime.commandUse("Billing");
+    assert.match(
+      await runtime.useExtension({ tool: "pagerduty__get_incident" }),
+      /declares no extensions, so there is nothing to call/
+    );
+    assert.doesNotMatch(await runtime.getContext(), /Extensions this context expects/);
+
+    await runtime.commandDisconnect();
+    assert.match(
+      await runtime.useExtension({ tool: "pagerduty__get_incident" }),
+      /No NeatContext Context is connected/
+    );
+    assert.match(await runtime.commandExtensions(""), /No context is connected/);
+    assert.match(await runtime.declareExtension({ id: "x", capability: "y" }), /nothing to declare/);
+  });
+
+  it("answers a command or declaration it cannot act on", async () => {
+    await createOrders();
+    await runtime.commandUse("Orders");
+    assert.match(await runtime.commandExtensions("wat"), /Unknown extensions action "wat"/);
+    assert.match(await runtime.commandExtensions("test"), /Use: \/neatcontext-extensions test/);
+    assert.match(await runtime.commandExtensions("remove"), /Use: \/neatcontext-extensions remove/);
+    assert.match(await runtime.declareExtension({ id: "pagerduty" }), /Pass the extension `id`/);
+    assert.match(
+      await runtime.declareExtension({ id: "Has Space", capability: "x" }),
+      /not a usable extension id/
+    );
+    await runtime.declareExtension({ id: "pagerduty", capability: "Read incidents." });
+    assert.match(
+      await runtime.commandExtensions("remove pagerduty"),
+      /no longer expects "pagerduty"/
+    );
   });
 });

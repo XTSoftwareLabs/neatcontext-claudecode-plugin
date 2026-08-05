@@ -74,9 +74,11 @@ describe("registration", () => {
         "describe_context",
         "get_context",
         "neatcontext_create",
+        "neatcontext_declare_extension",
         "neatcontext_save",
         "preview_context",
-        "use_context"
+        "use_context",
+        "use_extension"
       ]
     );
   });
@@ -105,6 +107,7 @@ describe("registration", () => {
         "neatcontext-delete",
         "neatcontext-disconnect",
         "neatcontext-export",
+        "neatcontext-extensions",
         "neatcontext-import",
         "neatcontext-list",
         "neatcontext-mode",

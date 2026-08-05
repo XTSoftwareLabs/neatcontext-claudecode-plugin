@@ -34,6 +34,17 @@ import {
   renderContext,
   updateCapturedContext
 } from "../core/context-store.mjs";
+import {
+  addExtensionToContext,
+  removeExtensionFromContext,
+  renderExtensionsStatus,
+  testExtension
+} from "../core/extension-commands.mjs";
+import {
+  createExtensionHost,
+  renderExtensionStatus,
+  renderExtensionTools
+} from "../core/extension-runtime.mjs";
 import { clearSelection, readSelection } from "../core/local-state.mjs";
 import {
   addAlias,
@@ -138,14 +149,123 @@ export async function sessionInstructions() {
 
 // --- get_context --------------------------------------------------------------
 
+// --- Extensions ---------------------------------------------------------------
+//
+// pi fixes its tool list when the extension loads, so an extension's tools
+// cannot be registered per context the way the MCP hosts register them. They are
+// reached through the one `use_extension` tool instead, and get_context — which
+// pi rebuilds every turn — is where their names, arguments and current status
+// are written down.
+
+const extensionHost = createExtensionHost();
+
+async function resolveExtensions(context) {
+  const record = context && !context.missing ? context.record : null;
+  return extensionHost.resolve(record).catch(() => ({ statuses: [], tools: [] }));
+}
+
+// Everything the model needs to use an extension, or to explain why it cannot.
+function renderExtensions({ statuses, tools }) {
+  const status = renderExtensionStatus(statuses);
+  if (!status) return "";
+  const calling = renderExtensionTools(tools);
+  return calling ? `${status}\n\n${calling}` : status;
+}
+
+export async function useExtension(args = {}) {
+  const name = typeof args.tool === "string" ? args.tool.trim() : "";
+  const context = await activeContext();
+  if (!context || context.missing) {
+    return (
+      "No NeatContext Context is connected to this session, so there are no extension tools " +
+      "to call. Connect one first."
+    );
+  }
+
+  const { statuses, tools } = await resolveExtensions(context);
+  if (tools.length === 0) {
+    const declared = statuses.length > 0;
+    return declared
+      ? `The "${context.record.name}" context declares extensions, but none of them are ` +
+          "available right now. Tell the user what was missing, and answer from the profile " +
+          `and knowledge folder instead.\n\n${renderExtensionStatus(statuses)}`
+      : `The "${context.record.name}" context declares no extensions, so there is nothing ` +
+          "to call here.";
+  }
+
+  const result = await extensionHost.call(name, args.arguments);
+  if (!result) {
+    return (
+      `"${name || "(no tool named)"}" is not something this context can call. It can call: ` +
+      `${tools.map((tool) => tool.name).join(", ")}.`
+    );
+  }
+  const content = Array.isArray(result.content) ? result.content : [];
+  const body = content
+    .map((entry) => (typeof entry?.text === "string" ? entry.text : JSON.stringify(entry)))
+    .join("\n");
+  return body.length > 0 ? body : "The extension returned nothing.";
+}
+
+// The `/neatcontext-extensions` command: what the connected context asks for,
+// and whether this machine answers.
+export async function commandExtensions(input = "") {
+  const [action = "", ...rest] = String(input).trim().split(/\s+/).filter(Boolean);
+  const id = rest.join(" ").trim();
+  const state = await loadState();
+  const record = state.connected?.record ?? null;
+
+  if (action.length === 0 || action === "status") {
+    return renderExtensionsStatus(record);
+  }
+  if (!record) {
+    return "No context is connected to this session, so there is nothing to change.";
+  }
+  if (action === "test") {
+    return id.length > 0 ? testExtension(record, id) : "Use: /neatcontext-extensions test <id>";
+  }
+  if (action === "remove") {
+    return id.length > 0
+      ? (await removeExtensionFromContext(record, id)).text
+      : "Use: /neatcontext-extensions remove <id>";
+  }
+  return (
+    `Unknown extensions action "${action}". Use: status | remove | test. ` +
+    "Add one with the neatcontext_declare_extension tool."
+  );
+}
+
+// Declaring is a tool rather than a command because the capability line is
+// written by the model from what the user just described, the same way a
+// routing description is.
+export async function declareExtension({ id, capability, tools, important } = {}) {
+  const state = await loadState();
+  const record = state.connected?.record ?? null;
+  if (!record) {
+    return "No context is connected to this session, so there is nothing to declare against.";
+  }
+  if (typeof id !== "string" || typeof capability !== "string" || capability.trim().length === 0) {
+    return "Pass the extension `id` and a `capability` line saying what it lets this context do.";
+  }
+  const added = await addExtensionToContext(record, id, {
+    capability,
+    tools: Array.isArray(tools) ? tools.join(",") : undefined,
+    important: important === true
+  });
+  return added.text;
+}
+
 export async function getContext() {
   const context = await activeContext();
   if (context) {
     const body = context.missing
       ? CONTEXT_MISSING_MESSAGE
       : await renderContext(context.record);
-    return `${body}\n\n${await pluginNotes()}`;
+    const extensions = renderExtensions(await resolveExtensions(context));
+    const parts = extensions ? [body, extensions] : [body];
+    return `${parts.join("\n\n")}\n\n${await pluginNotes()}`;
   }
+  await resolveExtensions(null);
   return `${NOTHING_CONNECTED}\n\n${await pluginNotes()}`;
 }
 

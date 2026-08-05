@@ -244,6 +244,37 @@ function extensionToolDescription(declaration, tool) {
   return own.length > 0 ? `${lead}\n\n${own}` : lead;
 }
 
+// The same tools, spelled out for a host that cannot register them.
+//
+// An MCP host receives each extension tool with its own name and schema, so the
+// model picks one the way it picks any other tool. A host with a tool list fixed
+// for the session cannot do that, and reaches its extensions through one proxy
+// instead — which means the names and arguments have to be written down
+// somewhere the model reads. This is that.
+export function renderExtensionTools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return "";
+  const lines = ["### Calling them", ""];
+  lines.push(
+    "Pass the exact tool name below as `tool`, and its arguments as `arguments`, to the " +
+      "use_extension tool."
+  );
+  for (const tool of tools) {
+    lines.push("");
+    lines.push(`- \`${tool.name}\``);
+    const description = typeof tool.description === "string" ? tool.description.trim() : "";
+    // The lead line repeats the context's capability for every tool of an
+    // extension; here it is already said above, so only the tool's own words
+    // are worth the space.
+    const own = description.includes("\n\n") ? description.split("\n\n").slice(1).join("\n\n") : "";
+    if (own.length > 0) lines.push(`  - ${own.replace(/\n+/g, " ")}`);
+    const properties = tool.inputSchema?.properties;
+    if (properties && Object.keys(properties).length > 0) {
+      lines.push(`  - Arguments: ${Object.keys(properties).join(", ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 // What get_context says about the extensions this context expects. Present only
 // when it expects some, and phrased so an unconfigured one reads as a thing the
 // user can fix rather than as a failure of the answer.
