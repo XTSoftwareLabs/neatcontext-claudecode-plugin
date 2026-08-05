@@ -1,0 +1,7 @@
+interface:
+  display_name: "Context Extensions"
+  short_description: "Show what this context expects to reach"
+  default_prompt: "Use $neatcontext:extensions to show what the connected context expects to reach and whether this machine provides it."
+
+policy:
+  allow_implicit_invocation: true
