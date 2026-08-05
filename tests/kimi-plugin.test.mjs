@@ -18,6 +18,7 @@ const commandNames = [
   "delete",
   "disconnect",
   "export",
+  "extensions",
   "import",
   "list",
   "mode",

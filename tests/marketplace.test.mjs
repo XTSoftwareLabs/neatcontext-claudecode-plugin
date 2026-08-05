@@ -112,6 +112,7 @@ test("commands pre-approve only the bundled CLI and never interpolate arguments 
     "delete",
     "disconnect",
     "export",
+    "extensions",
     "import",
     "list",
     "mode",

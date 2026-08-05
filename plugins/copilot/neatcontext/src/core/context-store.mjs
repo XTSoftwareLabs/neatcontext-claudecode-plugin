@@ -16,6 +16,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  normalizeExtensionDeclarations,
+  readExtensionDeclarations,
+  serializeExtensionDeclarations
+} from "./extensions.mjs";
 import { neatContextHome } from "./storage-home.mjs";
 
 export const CONTEXT_ID_PREFIX = "context:";
@@ -91,6 +96,10 @@ function recordFor(directory, parsed) {
     conversationKnowledgeFolder: knowledgeManaged ? null : path.join(directory, "knowledge"),
     routingDescription:
       typeof parsed.routingDescription === "string" ? parsed.routingDescription : "",
+    // What this context expects to be able to reach. Read leniently: a
+    // declaration this plugin cannot make sense of is dropped rather than
+    // allowed to hide the profile and knowledge behind it.
+    extensions: readExtensionDeclarations(parsed.extensions),
     capturedFrom: typeof parsed.capturedFrom === "string" ? parsed.capturedFrom : null,
     capturedFromConversation: isConversationCapture(parsed.capturedFrom),
     profilePath: path.join(directory, "profile.md"),
@@ -263,9 +272,10 @@ function contextPaths(cleanName) {
 // Creates the context from an already-answered wizard. Everything is validated
 // before anything is written, and the context is assembled in a temp directory
 // then renamed into place, so a failure never leaves a half-context behind.
-export async function createContext({ name, knowledgeFolder, profile }) {
+export async function createContext({ name, knowledgeFolder, profile, extensions }) {
   const cleanName = normalizeName(name);
   const profileText = normalizeProfile(profile);
+  const declarations = serializeExtensionDeclarations(extensions ?? []);
 
   const folder = path.resolve((knowledgeFolder ?? "").trim());
   if ((knowledgeFolder ?? "").trim().length === 0) {
@@ -290,6 +300,7 @@ export async function createContext({ name, knowledgeFolder, profile }) {
     revision: 1,
     knowledgeFolder: folder
   };
+  if (declarations) record.extensions = declarations;
   record.updatedAt = record.createdAt;
 
   await mkdir(staging, { recursive: true });
@@ -412,12 +423,14 @@ export async function createCapturedContext({
   profile,
   routingDescription,
   knowledge,
+  extensions,
   capturedFrom = "conversation"
 }) {
   const cleanName = normalizeName(name);
   const profileText = normalizeProfile(profile);
   const useWhen = normalizeRoutingDescription(routingDescription);
   const files = normalizeCaptureKnowledge(knowledge);
+  const declarations = serializeExtensionDeclarations(extensions ?? []);
   await ensureUniqueName(cleanName);
 
   const { suffix, directory, staging } = contextPaths(cleanName);
@@ -433,6 +446,7 @@ export async function createCapturedContext({
     capturedFrom: isConversationCapture(capturedFrom) ? capturedFrom : "conversation",
     routingDescription: useWhen
   };
+  if (declarations) record.extensions = declarations;
   record.updatedAt = record.createdAt;
 
   try {
@@ -502,6 +516,7 @@ export async function fingerprintContext(record) {
       knowledgeFolder: record.knowledgeFolder,
       knowledgeManaged: record.knowledgeManaged,
       routingDescription: record.routingDescription,
+      extensions: record.extensions,
       capturedFrom: record.capturedFrom,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
@@ -555,7 +570,8 @@ async function prepareCapturedContextUpdate({
   name,
   profile,
   routingDescription,
-  knowledge
+  knowledge,
+  extensions
 }) {
   const record = await readContext(targetId);
   if (!record) {
@@ -575,21 +591,31 @@ async function prepareCapturedContextUpdate({
   const profileText = normalizeProfile(profile);
   const useWhen = normalizeRoutingDescription(routingDescription);
   const files = normalizeCaptureKnowledge(knowledge);
+  // A save that says nothing about extensions leaves them exactly as they are.
+  // Declarations are usually added deliberately, by hand or by `extensions add`,
+  // and a conversation capture is not evidence that the user wants them gone.
+  const declarations =
+    extensions === undefined ? record.extensions : normalizeExtensionDeclarations(extensions);
   const currentKnowledge = await readGeneratedKnowledge(record);
   const changes = knowledgeChanges(currentKnowledge, files);
   const profileChanged = (await readProfileText(record)) !== profileText;
   const routingChanged = record.routingDescription !== useWhen;
+  const extensionsChanged =
+    JSON.stringify(record.extensions) !== JSON.stringify(declarations);
   return {
     record,
     profileText,
     useWhen,
     files,
+    declarations,
     changes,
     profileChanged,
     routingChanged,
+    extensionsChanged,
     changed:
       profileChanged ||
       routingChanged ||
+      extensionsChanged ||
       changes.added.length > 0 ||
       changes.updated.length > 0 ||
       changes.removed.length > 0
@@ -679,6 +705,7 @@ export async function updateCapturedContext(capture) {
       updatedAt: now,
       revision: prepared.record.revision + 1,
       routingDescription: prepared.useWhen,
+      extensions: serializeExtensionDeclarations(prepared.declarations),
       updatedFrom:
         typeof capture.updatedFrom === "string" && capture.updatedFrom.trim().length > 0
           ? capture.updatedFrom.trim()
@@ -717,7 +744,8 @@ export async function updateCapturedContext(capture) {
       knowledgeFileCount: prepared.files.length,
       changes: prepared.changes,
       profileChanged: prepared.profileChanged,
-      routingChanged: prepared.routingChanged
+      routingChanged: prepared.routingChanged,
+      extensionsChanged: prepared.extensionsChanged
     };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
@@ -787,8 +815,37 @@ export async function importCapturedContext({ bundleFolder, name }) {
     profile,
     routingDescription: manifest.routingDescription,
     knowledge,
+    // What the bundle says it expects to reach, reduced to declarations. The
+    // import creates no binding for any of them, so the imported context arrives
+    // able to say what it wants and unable to run anything until this machine's
+    // owner says otherwise.
+    extensions: readExtensionDeclarations(manifest.extensions),
     capturedFrom: manifest.capturedFrom
   });
+}
+
+// Rewrites only the declarations on a context's manifest, in place. This is the
+// authoring path — `extensions add` and `extensions remove` — and it is
+// deliberately narrow: it touches no knowledge, no profile, and no timestamps
+// other than `updatedAt`.
+export async function setContextExtensions(record, declarations) {
+  const serialized = serializeExtensionDeclarations(declarations);
+  const manifestPath = path.join(record.directory, "context.json");
+  const temporaryPath = path.join(
+    record.directory,
+    `.context-extensions-${randomBytes(6).toString("hex")}.json`
+  );
+  try {
+    const stored = JSON.parse(await readFile(manifestPath, "utf8"));
+    const manifest = { ...stored, updatedAt: new Date().toISOString() };
+    if (serialized) manifest.extensions = serialized;
+    else delete manifest.extensions;
+    await writeFile(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await rename(temporaryPath, manifestPath);
+    return recordFor(record.directory, manifest);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
 }
 
 function isInside(parent, child) {
@@ -879,6 +936,15 @@ export async function exportContext({ record, destination, force = false, routin
     manifest.schema = CONTEXT_SCHEMA;
     manifest.profileFile = "profile.md";
     delete manifest.kind;
+    // The last point at which this machine's copy becomes someone else's. Run
+    // the declarations back through the whitelist here, so whatever a hand edit
+    // may have added beside them — a command, an environment, a token — is not
+    // what leaves the building.
+    const declarations = serializeExtensionDeclarations(
+      readExtensionDeclarations(manifest.extensions)
+    );
+    if (declarations) manifest.extensions = declarations;
+    else delete manifest.extensions;
     if (useWhen.length > 0) manifest.routingDescription = useWhen;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 

@@ -113,6 +113,7 @@ test("all namespaced workflows are real skills without scaffold placeholders", a
     "delete",
     "disconnect",
     "export",
+    "extensions",
     "import",
     "list",
     "mode",

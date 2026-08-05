@@ -230,6 +230,26 @@ Run `/neatcontext:mode` without an argument to show the current mode. Add
 /neatcontext:mode auto --global
 ```
 
+### `/neatcontext:extensions`
+
+Show what the connected context expects to reach, and whether this machine
+provides it.
+
+A context can declare an extension — an MCP server that reaches a system the
+domain needs, such as your incident tracker or log store. The declaration
+travels with the context and says only what capability it wants. What actually
+provides that capability is a binding you write yourself, in
+`~/.neatcontext/extensions.json`, and it never leaves your machine.
+
+Nothing runs until both halves exist, so a context shared with you cannot
+execute anything by itself. When an extension is configured, its tools appear
+to the session named `<extension>__<tool>` and go away again the moment you
+switch context. When it is not, the report says exactly what is missing and the
+context still answers from its profile and knowledge folder.
+
+See the [extensions guide](docs/extensions.md) for the binding format,
+credential handling, and troubleshooting.
+
 ## Context contents
 
 A context contains:
@@ -279,6 +299,20 @@ Use `/neatcontext:save` to generate one from the current conversation,
 - Creating or updating a context never overwrites an external knowledge
   folder referenced by `/neatcontext:create`. Deleting a context always
   requires confirmation and removes its bundle-local generated knowledge.
+- A context can declare the extensions it expects, but a declaration names only
+  a capability. The command that provides it lives in
+  `~/.neatcontext/extensions.json` on your machine, is written by you, and is
+  never carried by a context you share or import. A command, environment, or
+  token written next to a declaration is discarded when the context is read and
+  when it is exported.
+- A binding is reachable by any context that declares its id, which is what
+  makes a context portable across machines. Bind what you are comfortable
+  exposing to any context you connect, and use `allowedContexts` to restrict a
+  binding to contexts you name. Prefer `envFrom` for credentials so they stay
+  in your environment rather than in a file.
+- An extension server is spawned without a shell, receives a small base
+  environment plus exactly what its binding names, and is stopped when the
+  session ends or switches context.
 
 ## License
 

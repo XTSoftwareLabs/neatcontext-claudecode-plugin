@@ -21,11 +21,13 @@
 import { bindPiSessionId } from "../src/pi/session.mjs";
 import {
   commandDisconnect,
+  commandExtensions,
   commandList,
   commandMode,
   commandStatus,
   commandUse,
   createContext,
+  declareExtension,
   deleteContext,
   describeContext,
   exportContext,
@@ -35,7 +37,8 @@ import {
   previewContext,
   saveContext,
   sessionInstructions,
-  useContext
+  useContext,
+  useExtension
 } from "../src/pi/runtime.mjs";
 
 const EMPTY_SCHEMA = { type: "object", properties: {}, additionalProperties: false };
@@ -318,6 +321,82 @@ export default function (pi) {
     }
   });
 
+  // The one place pi's fixed tool list costs something. The MCP hosts register
+  // each extension tool under its own name and schema, so the model chooses
+  // between them the way it chooses any tool. Here the tool list is settled
+  // before any context is connected, so the extensions of whichever context
+  // arrives later have to be reached through one proxy — and get_context, which
+  // pi rebuilds every turn, is what tells the model their names and arguments.
+  pi.registerTool({
+    name: "use_extension",
+    label: "use extension",
+    description:
+      "Call one of the connected context's extension tools. get_context lists the exact " +
+      "names available and what each one takes; pass one of those as `tool`. Only tools of " +
+      "the currently connected context can be called, and only when the user has configured " +
+      "that extension on this machine.",
+    promptSnippet:
+      "use_extension: reach the systems the connected context expects — call get_context " +
+      "first to see which of them are available right now.",
+    parameters: {
+      type: "object",
+      properties: {
+        tool: {
+          type: "string",
+          description: "The exact tool name from get_context, such as `pagerduty__get_incident`."
+        },
+        arguments: {
+          type: "object",
+          description: "The arguments that tool takes, as get_context describes them.",
+          additionalProperties: true
+        }
+      },
+      required: ["tool"],
+      additionalProperties: false
+    },
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      bindFrom(ctx);
+      return text(await useExtension(params ?? {}));
+    }
+  });
+
+  pi.registerTool({
+    name: "neatcontext_declare_extension",
+    label: "declare extension",
+    description:
+      "Record that the connected context expects an extension. This says what capability " +
+      "the context wants and travels with it; it configures nothing and connects nothing. " +
+      "The user binds a program to that id on each machine themselves.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "Short lowercase id for the extension, such as `pagerduty`."
+        },
+        capability: {
+          type: "string",
+          description: "One line: what this lets the context do. Under 200 characters."
+        },
+        tools: {
+          type: "array",
+          items: { type: "string" },
+          description: "Only these tools of that extension. Omit to take whatever it offers."
+        },
+        important: {
+          type: "boolean",
+          description: "The context leans on this rather than merely benefiting from it."
+        }
+      },
+      required: ["id", "capability"],
+      additionalProperties: false
+    },
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      bindFrom(ctx);
+      return text(await declareExtension(params ?? {}));
+    }
+  });
+
   // --- commands -------------------------------------------------------------
 
   async function contextNameCompletions(prefix) {
@@ -376,6 +455,18 @@ export default function (pi) {
         query = chosen;
       }
       report(pi, await commandUse(query));
+    }
+  });
+
+  pi.registerCommand("neatcontext-extensions", {
+    description: "What this context expects to reach, and whether this machine provides it",
+    getArgumentCompletions: (prefix) =>
+      ["status", "test", "remove"]
+        .filter((action) => action.startsWith(prefix))
+        .map((action) => ({ value: action, label: action })),
+    handler: async (args, ctx) => {
+      bindFrom(ctx);
+      report(pi, await commandExtensions(args));
     }
   });
 

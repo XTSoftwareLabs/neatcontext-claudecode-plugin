@@ -19,6 +19,8 @@ import {
   readContext,
   renderContext
 } from "../core/context-store.mjs";
+import { createExtensionHost, renderExtensionStatus } from "../core/extension-runtime.mjs";
+import { parseQualifiedToolName } from "../core/extensions.mjs";
 import {
   addAlias,
   menuEntries,
@@ -194,6 +196,31 @@ async function activeContext() {
   return record ? { record } : { missing: true, name: selection.contextName };
 }
 
+// --- Extensions: what the connected context can reach --------------------------
+
+// One host for the life of this process. It caches a connection per extension
+// and drops every one of them when the session switches context, so a tool
+// belonging to a context this session has left is never callable.
+const extensionHost = createExtensionHost();
+let extensionTools = [];
+let extensionStatuses = [];
+
+// Resolved before answering anything that depends on it, rather than on a timer:
+// starting a user's extension server is not something to do speculatively.
+async function refreshExtensions(context) {
+  const record = context && !context.missing ? context.record : null;
+  const resolved = await extensionHost.resolve(record).catch(() => ({ statuses: [], tools: [] }));
+  extensionTools = resolved.tools;
+  extensionStatuses = resolved.statuses;
+}
+
+function dependsOnExtensions(message) {
+  return (
+    message.method === "tools/list" ||
+    (message.method === "tools/call" && typeof message.params?.name === "string")
+  );
+}
+
 async function contextResponse(message, context) {
   const { id, method, params } = message;
   if (id === undefined || id === null) {
@@ -209,8 +236,12 @@ async function contextResponse(message, context) {
     });
   }
   if (method === "ping") return jsonRpcResult(id, {});
-  // A context is one profile and one folder: get_context is the whole surface.
-  if (method === "tools/list") return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL] });
+  // get_context is the whole grounding surface. Beside it sit whichever tools
+  // the connected context declared and this machine actually provides — none,
+  // usually, and never any that outlive the context they belong to.
+  if (method === "tools/list") {
+    return jsonRpcResult(id, { tools: [GET_CONTEXT_TOOL, ...extensionTools] });
+  }
   if (method === "prompts/list") return jsonRpcResult(id, { prompts: [] });
   if (method === "tools/call" && params?.name === GET_CONTEXT_TOOL.name) {
     if (!context) {
@@ -222,15 +253,25 @@ async function contextResponse(message, context) {
     const text = context.missing
       ? CONTEXT_MISSING_MESSAGE
       : await renderContext(context.record);
-    return jsonRpcResult(id, { content: [{ type: "text", text }], isError: false });
+    const extensions = renderExtensionStatus(extensionStatuses);
+    return jsonRpcResult(id, {
+      content: [{ type: "text", text: extensions ? `${text}\n\n${extensions}` : text }],
+      isError: false
+    });
   }
   if (method === "tools/call" || method === "prompts/get") {
+    // Named like an extension tool, but not one this context can reach: either
+    // it was never declared, or the extension behind it is not available.
+    const qualified = parseQualifiedToolName(params?.name);
     return {
       jsonrpc: "2.0",
       id,
       error: {
         code: -32601,
-        message: `"${params?.name}" is not available. Contexts serve only get_context.`
+        message: qualified
+          ? `"${params.name}" is not available from the connected context. Its extensions ` +
+            "are listed by get_context; answer from the profile and knowledge folder instead."
+          : `"${params?.name}" is not available. Contexts serve only get_context.`
       }
     };
   }
@@ -372,10 +413,13 @@ let lastVersion = undefined;
 async function currentVersion() {
   const mode = resolveMode(await readRouting(), sessionId());
   const context = await activeContext();
+  // The extension signature is read from what the last resolve found, never by
+  // starting anything: this runs on a timer, and a poll must not spawn a server.
+  const extensions = extensionHost.signature(context?.record ?? null);
   if (context) {
-    return `${mode}/${context.missing ? "context:missing" : context.record.id}`;
+    return `${mode}/${context.missing ? "context:missing" : context.record.id}/${extensions}`;
   }
-  return `${mode}/none`;
+  return `${mode}/none/${extensions}`;
 }
 
 async function handleMessage(message) {
@@ -389,6 +433,20 @@ async function handleMessage(message) {
   }
 
   const context = await activeContext();
+  if (dependsOnExtensions(message)) {
+    await refreshExtensions(context);
+  }
+
+  // An extension tool, proxied to the server the user bound for it. Answered
+  // before the context surface, which knows only about get_context.
+  if (message.method === "tools/call" && parseQualifiedToolName(message.params?.name)) {
+    const result = await extensionHost.call(message.params.name, message.params.arguments);
+    if (result) {
+      writeLine(jsonRpcResult(message.id, result));
+      return;
+    }
+  }
+
   const response = await contextResponse(message, context);
 
   if (message.method === "initialize" && response && response.result) {
@@ -499,7 +557,11 @@ function main() {
     // Serialize so the initialize handshake and ordering are preserved.
     queue = queue.then(() => handleMessage(message)).catch(() => {});
   });
-  rl.on("close", () => process.exit(0));
+  // Whatever this session started on its behalf goes with it.
+  rl.on("close", () => {
+    extensionHost.dispose();
+    process.exit(0);
+  });
 }
 
 main();
