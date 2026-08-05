@@ -65,7 +65,11 @@ function slugify(name) {
 
 function recordFor(directory, parsed) {
   const legacy = parsed?.schema === LEGACY_SCHEMA && parsed?.kind === "lite";
-  const current = parsed?.schema === CONTEXT_SCHEMA && parsed?.kind === undefined;
+  // `kind` is a schema 1 concept and means nothing at CONTEXT_SCHEMA, so a
+  // vestigial one is ignored rather than treated as an unreadable manifest.
+  // Being strict here stranded every context an older build upgraded without
+  // dropping it: the bundle was intact and the plugin could not see it.
+  const current = parsed?.schema === CONTEXT_SCHEMA;
   if ((!legacy && !current) || typeof parsed.id !== "string" || typeof parsed.name !== "string") {
     return null;
   }
@@ -711,6 +715,12 @@ export async function updateCapturedContext(capture) {
           ? capture.updatedFrom.trim()
           : "conversation"
     };
+    // Writing CONTEXT_SCHEMA over a legacy manifest is an upgrade, so the
+    // legacy marker has to go with it — `...stored` carries it in, and a
+    // manifest that claims the current schema while still saying `kind: "lite"`
+    // matches neither shape recordFor accepts, which makes the context
+    // unreadable. upgradeLegacyManifest and exportContext already drop it.
+    delete manifest.kind;
     if (prepared.record.knowledgeManaged) {
       manifest.knowledgeFolder = "knowledge";
       manifest.knowledgeManaged = true;
@@ -774,7 +784,9 @@ export async function importCapturedContext({ bundleFolder, name }) {
   }
   if (
     !(
-      (manifest?.schema === CONTEXT_SCHEMA && manifest.kind === undefined) ||
+      // As in recordFor: a vestigial `kind` alongside the current schema is
+      // ignorable, so a bundle an older build upgraded is still importable.
+      manifest?.schema === CONTEXT_SCHEMA ||
       (manifest?.schema === LEGACY_SCHEMA && manifest.kind === "lite")
     ) ||
     manifest.knowledgeManaged !== true ||
