@@ -22,6 +22,7 @@
 import { readFile, rm } from "node:fs/promises";
 import "./session.mjs";
 import { clearSelection, readSelection } from "../core/local-state.mjs";
+import { awaitBridgeSession, readBridgeSession, writeHostPointer } from "../core/host-session.mjs";
 import {
   createCapturedContext,
   createContext,
@@ -60,6 +61,49 @@ const CONTEXT_NOTE =
 
 function print(line = "") {
   process.stdout.write(`${line}\n`);
+}
+
+// This process is spawned for one command and its environment is fresh, so the
+// thread it names is the thread the user is actually in. The MCP bridge was
+// spawned once, when the window opened, and cannot know that `/new` gave it a
+// new one. Recording it here is what lets the bridge read the selection this
+// command is about to write.
+async function recordHostSession() {
+  return writeHostPointer(sessionId(), { source: "cli" }).catch(() => null);
+}
+
+// Whether the bridge that will serve this thread has caught up with it.
+//
+// The success message below is written from the record this process just wrote,
+// which is the one thing that cannot detect the failure this guards: a bridge
+// reading a different thread's file would leave the message true about the disk
+// and false about the thread. The bridge publishes what it resolved, so ask it.
+// A bridge that publishes nothing (an older build, none running, or a bridge
+// whose host key this shell-spawned process cannot compute) is not evidence of
+// anything and gets no warning.
+async function bridgeDriftWarning() {
+  const id = sessionId();
+  if (!id) {
+    return null;
+  }
+  const { state } = await awaitBridgeSession(id);
+  if (state !== "drifted") {
+    return null;
+  }
+  return (
+    "Warning: NeatContext's MCP server in this window is still serving an earlier " +
+    "thread and has not picked this one up, so `get_context` may keep returning the " +
+    "previous context. Restart Codex to clear it, and report it at " +
+    "https://github.com/XTSoftwareLabs/neatcontext-plugins/issues."
+  );
+}
+
+async function printBridgeDrift() {
+  const warning = await bridgeDriftWarning();
+  if (warning) {
+    print("");
+    print(warning);
+  }
 }
 
 // `--name value`, `--name=value`, and bare `--flag` booleans.
@@ -135,6 +179,18 @@ async function loadState() {
 
 async function commandStatus(state) {
   const { connected, selection } = state;
+  // First, because it changes what everything below is about: if the bridge is
+  // on another thread, this is a report about a selection it is not reading.
+  const bridge = await readBridgeSession().catch(() => null);
+  if (bridge && sessionId() && bridge.sessionId !== sessionId()) {
+    print(
+      "Warning: NeatContext's MCP server in this window is serving an earlier thread " +
+        `(${bridge.sessionId}), not this one (${sessionId()}). What follows is what this ` +
+        "thread selected; `get_context` may still answer from the other one. Restart " +
+        "Codex to clear it."
+    );
+    print("");
+  }
   const routing = await readRouting();
   const mode = resolveMode(routing, sessionId());
   // Reported alongside the connection because the two together are the whole
@@ -379,6 +435,7 @@ async function commandUse(state, query) {
       "will be grounded in its domain profile and knowledge folder."
   );
   await nudgeForDescription(target);
+  await printBridgeDrift();
 }
 
 async function commandDisconnect(state) {
@@ -393,6 +450,9 @@ async function commandDisconnect(state) {
 
   const name = connected?.name ?? remembered.contextName;
   print(`Disconnected the "${name}" context from this thread.`);
+  // Same exposure as connecting: a bridge on another thread clears nothing the
+  // thread it is serving can see.
+  await printBridgeDrift();
 }
 
 // A context with no routing description can only be routed to by name.
@@ -848,6 +908,13 @@ async function run() {
   if (command === "mode") {
     await commandMode(query, flags);
     return;
+  }
+
+  // Before the commands that change what this thread is grounded in: the write
+  // is worthless if the bridge is still reading another thread's file, and this
+  // is the process that knows which thread that is.
+  if (command === "use" || command === "disconnect") {
+    await recordHostSession();
   }
 
   const state = await loadState();

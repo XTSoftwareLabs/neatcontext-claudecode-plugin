@@ -1,6 +1,11 @@
 // NeatContext plugin MCP server for Codex.
 //
 // Behaviors kept from the Claude Code bridge:
+//   * this process outlives the thread it was spawned in — /new starts a new
+//     one without restarting it — so the host session is re-resolved before
+//     every message rather than read once from the environment. Without that,
+//     the bridge goes on serving the pre-/new thread's context while the
+//     SessionStart hook and the skills write the new one's.
 //   * initialize advertises tools.listChanged, and we poll the selected
 //     context so the host refreshes its tool list when the user runs
 //     $neatcontext:use (or the session routes itself).
@@ -10,7 +15,7 @@
 //     get_context instead of silently vanishing.
 
 import readline from "node:readline";
-import "./session.mjs";
+import { publishSessionId, refreshSessionId } from "./session.mjs";
 import { readSelection } from "../core/local-state.mjs";
 import {
   CONTEXT_MISSING_MESSAGE,
@@ -414,20 +419,35 @@ let lastVersion = undefined;
 // What the host's tool list depends on. Switching between contexts has to
 // change this; so does the routing mode, because leaving manual has to make the
 // routing tools appear without waiting for a restart.
+// Re-resolve which thread this process is serving, and publish the answer so a
+// skill-run command can tell whether its write is the one this bridge will read.
+async function syncSession() {
+  await refreshSessionId();
+  await publishSessionId();
+}
+
 async function currentVersion() {
+  // The session is part of it: `/new` changes what this process is grounded in
+  // without changing anything the selection or the mode can report, and the
+  // host has to be told to drop the previous thread's extension tools.
+  const session = sessionId() ?? "none";
   const mode = resolveMode(await readRouting(), sessionId());
   const context = await activeContext();
   // The extension signature is read from what the last resolve found, never by
   // starting anything: this runs on a timer, and a poll must not spawn a server.
   const extensions = extensionHost.signature(context?.record ?? null);
   if (context) {
-    return `${mode}/${context.missing ? "context:missing" : context.record.id}/${extensions}`;
+    return `${session}/${mode}/${context.missing ? "context:missing" : context.record.id}/${extensions}`;
   }
-  return `${mode}/none/${extensions}`;
+  return `${session}/${mode}/none/${extensions}`;
 }
 
 async function handleMessage(message) {
   const isNotification = message.id === undefined || message.id === null;
+  // Before anything reads a selection or a routing mode: which thread this
+  // host is on may have changed since the last message, and every one of those
+  // is per session.
+  await syncSession();
 
   // Routing tools decide which context serves the session next, so they are
   // answered before that choice is read.
@@ -538,6 +558,10 @@ function startVersionWatch() {
   watching = true;
   setInterval(async () => {
     if (!started) return;
+    // The host does not send a message when the user runs `/new`, so this tick
+    // is where a thread change is noticed if nothing else asks first — and
+    // where the published answer stays fresh enough to be checked against.
+    await syncSession();
     const version = await currentVersion();
     if (version !== null && version !== lastVersion) {
       lastVersion = version;
