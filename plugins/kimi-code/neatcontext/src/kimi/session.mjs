@@ -4,6 +4,14 @@
 // does not expose that value as an MCP process environment variable. Skills
 // pass the id to the CLI, while the MCP bridge binds its per-session process
 // through the bind_session tool before exposing context-dependent tools.
+//
+// The binding is deliberately re-assignable. The bridge process outlives the
+// session it was first bound in — a new session in the same window keeps the
+// same MCP server — and each new session's skill expansion carries the new id.
+// Refusing the rebind used to leave the bridge stuck on the session that ended,
+// loudly erroring until Kimi restarted; accepting it re-grounds the bridge in
+// the session that is actually asking. A session change must not inherit the
+// previous session's context, which per-session selection files already ensure.
 
 import { configureSessionId } from "../core/session.mjs";
 
@@ -28,16 +36,18 @@ export function normalizeKimiSessionId(value) {
   return id;
 }
 
+// Returns what changed, so the caller can tell a fresh bind ({ id, rebound:
+// false }) from a session change ({ id, rebound: true }) and refresh what
+// depends on it. An invalid id still throws: reverting to the unbound id would
+// silently strip the grounding of whatever session is active.
 export function bindKimiSessionId(value) {
   const id = normalizeKimiSessionId(value);
   if (!id) {
     throw new TypeError("Kimi Code supplied an invalid session id.");
   }
-  if (boundSessionId && boundSessionId !== id) {
-    throw new Error("This NeatContext bridge is already bound to another Kimi Code session.");
-  }
+  const rebound = boundSessionId !== null && boundSessionId !== id;
   boundSessionId = id;
-  return id;
+  return { id, rebound };
 }
 
 export function kimiSessionId() {

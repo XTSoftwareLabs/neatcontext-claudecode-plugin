@@ -499,8 +499,27 @@ async function handleMessage(message) {
 
   if (message.method === "tools/call" && message.params?.name === BIND_SESSION_TOOL.name) {
     try {
-      bindKimiSessionId(message.params?.arguments?.session_id);
-      writeLine(toolText(message.id, "This bridge is already bound to this Kimi Code session."));
+      const { rebound } = bindKimiSessionId(message.params?.arguments?.session_id);
+      if (!rebound) {
+        writeLine(toolText(message.id, "This bridge is already bound to this Kimi Code session."));
+        return;
+      }
+      // A new session in the same window: the bridge process survived it, and
+      // the skill expansion just handed over the new id. Everything session-
+      // scoped — the selection, the routing mode, the extension tools — changes
+      // with it, so answer like a first bind and tell the host to refetch the
+      // tool list rather than serve the ended session's.
+      const selected = await activeContext();
+      writeLine(
+        toolText(
+          message.id,
+          selected
+            ? `The "${selected.record?.name ?? selected.name}" context is selected for this Kimi Code session.`
+            : "No NeatContext context is selected for this Kimi Code session."
+        )
+      );
+      lastVersion = await currentVersion();
+      writeLine({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
     } catch (error) {
       writeLine(toolText(message.id, error?.message ?? "Could not bind this session.", true));
     }

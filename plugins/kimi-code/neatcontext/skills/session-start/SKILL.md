@@ -16,8 +16,10 @@ Kimi Code does not pass its session id to MCP child processes. At the first
 user request in this session, call the NeatContext `bind_session` tool with the
 exact id above before answering. The tool returns the current selection and
 routing menu, then replaces itself with the context-dependent tools. Call it
-only once per bridge lifetime. If a resumed session exposes only
-`bind_session` again, bind it again with the same injected id.
+once per session, not per request. The bridge process can outlive the session
+it was bound in, so binding this session's id also re-grounds a bridge left
+over from an earlier session in the same window — the tool reports this
+session's selection either way.
 
 After binding:
 
