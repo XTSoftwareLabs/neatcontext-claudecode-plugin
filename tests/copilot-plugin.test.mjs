@@ -387,6 +387,17 @@ test("Copilot commands are complete, local-only, and pre-approve only the bundle
     const frontmatter = parseFrontmatter(markdown, file);
 
     assert.ok(frontmatter.description, `${file} must carry a description`);
+    // Copilot reads this frontmatter as real YAML and requires a string. An
+    // unquoted `argument-hint: [context name]` is a YAML flow sequence, so the
+    // host rejects the whole command with "argument-hint must be a string".
+    const hint = frontmatter["argument-hint"];
+    if (hint !== undefined) {
+      assert.match(
+        hint,
+        /^(["']).*\1$/,
+        `${file} must quote its argument-hint so YAML reads it as a string, not a sequence`
+      );
+    }
     assert.ok(
       frontmatter["allowed-tools"]?.includes(
         'Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)'
