@@ -40,7 +40,9 @@ const GET_CONTEXT_TOOL = {
   title: "Get Context",
   description:
     "Get the connected NeatContext Context: domain profile files to read, and local " +
-    "knowledge folders to search.",
+    "knowledge folders to search. Call this before answering anything that depends on the " +
+    "user's own domain, documents, tools, or team conventions — some hosts do not surface " +
+    "this server's initialize instructions, so the tool description is what carries that rule.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false }
 };
 // What to say when a session has nothing to ground in. It is deliberately about
