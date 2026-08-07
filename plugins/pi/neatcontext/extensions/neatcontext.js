@@ -137,7 +137,8 @@ export default function (pi) {
     label: "get context",
     description:
       "Get the connected NeatContext Context: domain profile files to read and local " +
-      "knowledge folders to search.",
+      "knowledge folders to search. Call this before answering anything that depends on the " +
+      "user's own domain, documents, tools, or team conventions.",
     promptSnippet:
       "get_context: the user's own domain knowledge — call before answering anything that " +
       "depends on their systems, documents, or team conventions.",
