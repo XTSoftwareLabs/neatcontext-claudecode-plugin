@@ -1,6 +1,6 @@
 ---
 description: Save this conversation as a new or existing reusable context
-argument-hint: [new or existing context name]
+argument-hint: "[new or existing context name]"
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Write, Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---

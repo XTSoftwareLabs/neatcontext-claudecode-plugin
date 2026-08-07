@@ -1,6 +1,6 @@
 ---
 description: Choose how this session may switch contexts on its own
-argument-hint: [auto|ask|manual]
+argument-hint: "[auto|ask|manual]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---

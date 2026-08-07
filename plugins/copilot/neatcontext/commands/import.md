@@ -1,6 +1,6 @@
 ---
 description: Import a conversation context bundle shared by a teammate
-argument-hint: [bundle folder]
+argument-hint: "[bundle folder]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/copilot/neatcontext-cli.mjs":*)
 ---

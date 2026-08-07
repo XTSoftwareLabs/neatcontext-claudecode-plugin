@@ -1,6 +1,6 @@
 ---
 description: Delete a NeatContext Context
-argument-hint: [context name or number]
+argument-hint: "[context name or number]"
 disable-model-invocation: true
 allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/src/claude/neatcontext-cli.mjs":*)
 ---
