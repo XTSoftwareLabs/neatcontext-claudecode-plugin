@@ -39,7 +39,7 @@ import {
 } from "../core/routing.mjs";
 import { applySelection, resolveContext } from "../core/selection.mjs";
 
-const SERVER_INFO = { name: "neatcontext", version: "0.3.1" };
+const SERVER_INFO = { name: "neatcontext", version: "0.3.2" };
 const GET_CONTEXT_TOOL = {
   name: "get_context",
   title: "Get Context",
