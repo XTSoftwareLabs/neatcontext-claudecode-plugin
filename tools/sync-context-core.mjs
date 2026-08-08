@@ -16,6 +16,7 @@ const files = [
   "local-state.mjs",
   "mcp-stdio-client.mjs",
   "routing.mjs",
+  "routing-search.mjs",
   "selection.mjs",
   "storage-home.mjs"
 ];
